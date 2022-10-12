@@ -9,6 +9,10 @@
 #include <ArduinoOTA.h>
 #include <IotWebConf.h>
 #include <IotWebConfUsing.h>
+#include <NTPClient.h>
+#include <WiFiUdp.h>
+#include <time.h>
+
 
 #define STRING_LEN 128
 
@@ -16,6 +20,8 @@
 const int ONEWIREPIN = D8;
 const int PUMPPIN = D3;
 const int VALVEPIN = D4;
+const int DISPLAYPIN = D5;
+const int LEDPIN = D6;
 const int WIFICONFIGPIN = D7;
 
 // Setup a oneWire instance to communicate with any OneWire devices
@@ -29,6 +35,10 @@ DeviceAddress sensor1_id;
 
 //OLED Display
 SSD1306Wire display(0x3c, SDA, SCL);   // ADDRESS, SDA, SCL  -  SDA and SCL usually populate automatically based on your board's pins_arduino.h e.g. https://github.com/esp8266/Arduino/blob/master/variants/nodemcu/pins_arduino.h
+unsigned int displayPage = 0;
+int displayPinState = HIGH;
+unsigned long displayLastChanged = 0;
+
 
 char mqttServer[STRING_LEN];
 char mqttUser[STRING_LEN];
@@ -49,6 +59,15 @@ Ticker disinfection24hTimer;
 Ticker checkTimer;
 Ticker updateDisplayTimer;
 
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP);
+char ntpServer[STRING_LEN] = "at.pool.ntp.org";
+char ntpTimezone[STRING_LEN] =  "CET-1CEST,M3.5.0/02,M10.5.0/03";
+time_t now;
+
+String pump[5] = {"", "", "", "", ""};
+unsigned int pumpCnt = 0;
+
 static float t[] = {0.0,  0.0,  0.0,  0.0,  0.0}; //letzten 5 Temepraturwerte speichern
 bool pumpRunning = false;
 float tempOut;
@@ -58,7 +77,7 @@ IPAddress localIP;
 
 #define CONFIG_VERSION "1"
 int iotWebConfPinState = HIGH;
-unsigned long lastReport = 0;
+unsigned long iotWebConfLastChanged = 0;
 DNSServer dnsServer;
 WebServer server(80);
 IotWebConf iotWebConf("Zirkulationspumpe", &dnsServer, &server, "");
@@ -66,6 +85,10 @@ IotWebConfParameterGroup mqttGroup = IotWebConfParameterGroup("mqtt", "MQTT conf
 IotWebConfTextParameter mqttServerParam = IotWebConfTextParameter("MQTT server", "mqttServer", mqttServer, STRING_LEN);
 IotWebConfTextParameter mqttUserNameParam = IotWebConfTextParameter("MQTT user", "mqttUser", mqttUser, STRING_LEN);
 IotWebConfPasswordParameter mqttUserPasswordParam = IotWebConfPasswordParameter("MQTT password", "mqttPassword", mqttPassword, STRING_LEN);
+IotWebConfParameterGroup ntpGroup = IotWebConfParameterGroup("ntp", "NTP configuration");
+IotWebConfTextParameter ntpServerParam = IotWebConfPasswordParameter("NTP Server", "ntpServer", ntpServer, STRING_LEN);
+IotWebConfTextParameter ntpTimezoneParam = IotWebConfPasswordParameter("NTP timezone", "ntpTimezone", ntpTimezone, STRING_LEN);
+
 
 // -- SECTION: Wifi Manager
 void handleRoot()
@@ -77,13 +100,19 @@ void handleRoot()
     return;
   }
   String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
-  s += "<title>IotWebConf 06 MQTT App</title></head><body>MQTT App demo";
+  s += "<title>Warmwasserzirkulationspumpe</title></head><body>MQTT";
   s += "<ul>";
-  s += "<li>MQTT server: ";
+  s += "<li>MQTT Server: ";
   s += mqttServer;
   s += "</li>";
+  s += "<li>NTP Server: ";
+  s += ntpServer;
+  s += "</li>";
+  s += "<li>NTP Timezone: ";
+  s += ntpTimezone;
+  s += "</li>";
   s += "</ul>";
-  s += "Go to <a href='config'>configure page</a> to change values.";
+  s += "Auf zu den <a href='config'>Einstellungen</a>";
   s += "</body></html>\n";
 
   server.send(200, "text/html", s);
@@ -91,7 +120,7 @@ void handleRoot()
 
 void configSaved()
 {
-  Serial.println("Configuration was updated.");
+  Serial.println("Einstellungen aktualisiert.");
   needReset = true;
 }
 
@@ -103,7 +132,7 @@ bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper)
   int l = webRequestWrapper->arg(mqttServerParam.getId()).length();
   if (l < 3)
   {
-    mqttServerParam.errorMessage = "Please provide at least 3 characters!";
+    mqttServerParam.errorMessage = "Bitte mindestens 3 Zeichen eingeben!";
     valid = false;
   }
 
@@ -120,21 +149,25 @@ void onWifiConnected() {
   Serial.println("Connected to Wi-Fi.");  
   Serial.println(WiFi.localIP());
   connectToMqtt();
+  timeClient.begin();
 }
 
 void onWifiDisconnect(WiFiEvent_t event, WiFiEventInfo_t info) {
   Serial.println("Disconnected from Wi-Fi.");  
   mqttReconnectTimer.detach(); // ensure we don't reconnect to MQTT while reconnecting to Wi-Fi  
+  timeClient.end();
 }
 
 void onMqttConnect(bool sessionPresent) {
   Serial.println("Connected to MQTT.");
   Serial.print("Session present: ");
   Serial.println(sessionPresent);
+  digitalWrite(LED_BUILTIN, HIGH);
 }
 
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
   Serial.println("Disconnected from MQTT.");
+  digitalWrite(LED_BUILTIN, LOW);
 
   if (WiFi.isConnected()) {
     mqttReconnectTimer.once(2, connectToMqtt);
@@ -153,30 +186,40 @@ void updateDisplay() {
   char tempOutStr[5];
   char tempRetStr[5];
 
-  display.setFont(ArialMT_Plain_10);
-  display.setTextAlignment(TEXT_ALIGN_CENTER);
-  if (WiFi.isConnected()) {
-    display.drawString(0, 0, String(WiFi.localIP()));
-  } else {
-    display.drawString(0, 0, "nicht verbunden");
-  }  
   
-  dtostrf(tempOut, 2, 2, tempOutStr); 
-  dtostrf(tempRet, 2, 2, tempRetStr); 
-  display.setTextAlignment(TEXT_ALIGN_LEFT);
-  display.drawString(0, 12, "Vorlauf: ");
-  display.drawString(64, 12, String(tempOutStr));
-  display.drawString(0, 24, "Rücklauf: ");
-  display.drawString(64, 24, String(tempRetStr));
+  if (displayPage = 0) {
+    display.setFont(ArialMT_Plain_10);
+    display.setTextAlignment(TEXT_ALIGN_CENTER);
+    if (WiFi.isConnected()) {
+      display.drawString(0, 0, String(WiFi.localIP()));
+    } else {
+      display.drawString(0, 0, "nicht verbunden");
+    }  
+    
+    dtostrf(tempOut, 2, 2, tempOutStr); 
+    dtostrf(tempRet, 2, 2, tempRetStr); 
+    display.setTextAlignment(TEXT_ALIGN_LEFT);
+    display.drawString(0, 12, "Vorlauf: ");
+    display.drawString(64, 12, String(tempOutStr));
+    display.drawString(0, 24, "Rücklauf: ");
+    display.drawString(64, 24, String(tempRetStr));
 
-  display.setFont(ArialMT_Plain_24);
-  display.drawString(0, 36, "Pumpe: ");
-  if (pumpRunning) {
-    display.invertDisplay();
-    display.drawString(64, 36, "an"); 
-  } else {
-    display.normalDisplay();
-    display.drawString(64, 36, "aus");
+    display.setFont(ArialMT_Plain_24);
+    display.drawString(0, 36, "Pumpe: ");
+    if (pumpRunning) {
+      display.invertDisplay();
+      display.drawString(64, 36, "an"); 
+    } else {
+      display.normalDisplay();
+      display.drawString(64, 36, "aus");
+    }
+  } else {  // Display Page 2 - last 5 pump starts
+    display.setTextAlignment(TEXT_ALIGN_LEFT);
+    display.setFont(ArialMT_Plain_10);
+    display.clear();
+    for(unsigned int cnt;cnt++;cnt<=4) {
+      display.println(pump[cnt]);
+    }
   }
 }
 
@@ -186,6 +229,11 @@ void pumpOn() {
   pumpRunning = true;
   digitalWrite(PUMPPIN, HIGH);
   digitalWrite(VALVEPIN, HIGH);
+
+  timeClient.update();
+  Serial.println(timeClient.getFormattedTime());  
+  pump[pumpCnt] = timeClient.getFormattedTime();
+  if(++pumpCnt >= 5) pumpCnt = 0;   //Reset counter
 }
 
 void pumpOff() {
@@ -233,7 +281,23 @@ void check() {
 void setup() {
   //basic setup
   Serial.begin(115200);
+  pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(PUMPPIN, OUTPUT);
+  pinMode(VALVEPIN, OUTPUT);
+  pinMode(LEDPIN, OUTPUT);
+  digitalWrite(PUMPPIN, LOW);
+  digitalWrite(VALVEPIN, LOW);
+  digitalWrite(LEDPIN, LOW);
+  digitalWrite(LED_BUILTIN, LOW); 
 
+  pinMode(DISPLAYPIN, INPUT_PULLUP);
+  pinMode(WIFICONFIGPIN, INPUT_PULLUP);
+
+  // configure the timezone
+  configTime(0, 0, ntpServer);
+  setenv("TZ", ntpTimezone, 1); // Set environment variable with your time zone
+  tzset(); 
+  
   // WiFi.onEvent(onWifiConnected, ARDUINO_EVENT_WIFI_STA_CONNECTED);
   WiFi.onEvent(onWifiDisconnect, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   WiFi.setAutoReconnect(true);
@@ -242,10 +306,13 @@ void setup() {
   mqttGroup.addItem(&mqttUserNameParam);
   mqttGroup.addItem(&mqttUserPasswordParam);
   iotWebConf.addParameterGroup(&mqttGroup);
+  ntpGroup.addItem(&ntpServerParam);
+  ntpGroup.addItem(&ntpTimezoneParam);
+  iotWebConf.addParameterGroup(&ntpGroup);  
   iotWebConf.setConfigSavedCallback(&configSaved);
   iotWebConf.setFormValidator(&formValidator);
   iotWebConf.setWifiConnectionCallback(&onWifiConnected);
-  iotWebConf.setStatusPin(LED_BUILTIN);
+  iotWebConf.setStatusPin(LEDPIN);  
   iotWebConf.setConfigPin(WIFICONFIGPIN);
   iotWebConf.init();
   // -- Set up required URL handlers on the web server.
@@ -265,19 +332,12 @@ void setup() {
 
   mqttClient.onConnect(onMqttConnect);
   mqttClient.onDisconnect(onMqttDisconnect);
-  mqttClient.onPublish(onMqttPublish);
+  mqttClient.onPublish(onMqttPublish);  
   if (mqttUser != "") mqttClient.setCredentials(mqttUser, mqttPassword);
   mqttClient.setServer(mqttServer, MQTT_PORT);
 
   display.init();
   display.setFont(ArialMT_Plain_10);
-  
-  pinMode(LED_BUILTIN, OUTPUT);
-  pinMode(PUMPPIN, OUTPUT);
-  pinMode(VALVEPIN, OUTPUT);
-  digitalWrite(PUMPPIN, LOW);
-  digitalWrite(VALVEPIN, LOW);
-  digitalWrite(LED_BUILTIN, LOW); 
 
   sensors.begin();
   Serial.print("Found "); 
@@ -344,12 +404,26 @@ void loop() {
     ESP.restart();
   }
 
+  // Check buttons
   unsigned long now = millis();
-  if ((500 < now - lastReport) && (iotWebConfPinState != digitalRead(WIFICONFIGPIN)))
+  if ((500 < now - iotWebConfLastChanged) && (iotWebConfPinState != digitalRead(WIFICONFIGPIN)))
   {
     iotWebConfPinState = 1 - iotWebConfPinState; // invert pin state as it is changed
-    lastReport = now;
+    iotWebConfLastChanged = now;
+  }
+  if ((500 < now - displayLastChanged) && (displayPinState != digitalRead(DISPLAYPIN)))
+  {
+    displayPinState = 1 - displayPinState; // invert pin state as it is changed
+    displayLastChanged = now;
+
+  }
+
+  //react on buttons
+  if (iotWebConfPinState) {  //reset settings and reboot
     iotWebConf.resetWifiAuthInfo();
     needReset = true;
+  }
+  if (displayPinState) {
+    if (displayPage == 0) displayPage = 1; else displayPage = 0;
   }
 }
