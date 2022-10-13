@@ -186,7 +186,7 @@ void updateDisplay() {
   char tempOutStr[5];
   char tempRetStr[5];
 
-  
+  display.clear();
   if (displayPage = 0) {
     display.setFont(ArialMT_Plain_10);
     display.setTextAlignment(TEXT_ALIGN_CENTER);
@@ -216,9 +216,10 @@ void updateDisplay() {
   } else {  // Display Page 2 - last 5 pump starts
     display.setTextAlignment(TEXT_ALIGN_LEFT);
     display.setFont(ArialMT_Plain_10);
-    display.clear();
-    for(unsigned int cnt;cnt++;cnt<=4) {
-      display.println(pump[cnt]);
+    for(unsigned int cnt = pumpCnt;cnt++;cnt<=4 + pumpCnt) { //display last 5 pumpOn Events in right order
+      unsigned int pumpCntTemp;
+      if (cnt > 4) pumpCntTemp = cnt - 5; else pumpCntTemp = cnt;
+      display.println(pump[pumpCntTemp]);
     }
   }
 }
@@ -264,7 +265,7 @@ void check() {
   if(++checkCnt >= 5) checkCnt = 0;   //Reset counter
   t[checkCnt] = tempOut;
   int cnt_alt = (checkCnt + 6) % 5;
-  if(!pumpRunning) {
+  if(!pumpRunning && tempRet < tempOut - 10.0) {  //start only if retern flow temp is 10 degree below temp out (hystersis)
     temperatur_delta = t[checkCnt]-t[cnt_alt]; // Difference to 5 sec before
     if(temperatur_delta >= 0.12) {        // smallest temp change is 0,12°C, 
       pumpOn();
@@ -272,7 +273,6 @@ void check() {
     }
   } else {
     if (tempRet > tempOut - 5.0) { //if return flow temp near temp out stop pump with a delay
-      delay(120000);
       pumpOff();      
     }
   }
