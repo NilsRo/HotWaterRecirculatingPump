@@ -12,16 +12,15 @@
 #include <NTPClient.h>
 #include <WiFiUdp.h>
 #include <time.h>
-
+#include <uptime.h>
 
 #define STRING_LEN 128
 
-//ports
+// ports
 const int ONEWIREPIN = D8;
 const int PUMPPIN = D3;
 const int VALVEPIN = D4;
 const int DISPLAYPIN = D5;
-const int LEDPIN = D6;
 const int WIFICONFIGPIN = D7;
 
 // Setup a oneWire instance to communicate with any OneWire devices
@@ -29,16 +28,15 @@ OneWire oneWire(ONEWIREPIN);
 
 // Pass our oneWire reference to Dallas Temperature sensor
 DallasTemperature sensors(&oneWire);
-
 DeviceAddress sensor0_id;
 DeviceAddress sensor1_id;
+bool sensorError = false;
 
-//OLED Display
-SSD1306Wire display(0x3c, SDA, SCL);   // ADDRESS, SDA, SCL  -  SDA and SCL usually populate automatically based on your board's pins_arduino.h e.g. https://github.com/esp8266/Arduino/blob/master/variants/nodemcu/pins_arduino.h
+// OLED Display
+SSD1306Wire display(0x3C, SDA, SCL); // ADDRESS, SDA, SCL  -  SDA and SCL usually populate automatically based on your board's pins_arduino.h e.g. https://github.com/esp8266/Arduino/blob/master/variants/nodemcu/pins_arduino.h
 unsigned int displayPage = 0;
 int displayPinState = HIGH;
 unsigned long displayLastChanged = 0;
-
 
 char mqttServer[STRING_LEN];
 char mqttUser[STRING_LEN];
@@ -50,7 +48,6 @@ bool needReset = false;
 #define MQTT_PORT 1883
 #define MQTT_PUB_TEMP_OUT "ww/ht/dhw_Tflow_measured"
 #define MQTT_PUB_TEMP_RET "ww/ht/dhw_Treturn"
-#define MQTT_PUB_TEMP_INT "ww/ht/Tint"
 #define MQTT_PUB_PUMP "ww/ht/dhw_pump_circulation"
 #define MQTT_PUB_INFO "ww/ht/dhw_info"
 AsyncMqttClient mqttClient;
@@ -62,19 +59,19 @@ Ticker updateDisplayTimer;
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP);
-char ntpServer[STRING_LEN] = "at.pool.ntp.org";
-char ntpTimezone[STRING_LEN] =  "CET-1CEST,M3.5.0/02,M10.5.0/03";
-char hostname[STRING_LEN] =  "ww_pump";
+char ntpServer[STRING_LEN];
+char ntpTimezone[STRING_LEN];
+char hostname[STRING_LEN];
 time_t now;
+struct tm localTime;
 
 String pump[5] = {"", "", "", "", ""};
 unsigned int pumpCnt = 0;
 
-static float t[] = {0.0,  0.0,  0.0,  0.0,  0.0}; //letzten 5 Temepraturwerte speichern
+static float t[] = {0.0, 0.0, 0.0, 0.0, 0.0}; // letzten 5 Temepraturwerte speichern
 bool pumpRunning = false;
 float tempOut;
 float tempRet;
-float tempInt;
 unsigned int checkCnt;
 IPAddress localIP;
 
@@ -85,15 +82,14 @@ DNSServer dnsServer;
 WebServer server(80);
 IotWebConf iotWebConf("Zirkulationspumpe", &dnsServer, &server, "");
 IotWebConfParameterGroup networkGroup = IotWebConfParameterGroup("network", "Network configuration");
-IotWebConfTextParameter hostnameParam = IotWebConfTextParameter("Hostname", "hostname", hostname, STRING_LEN);
+IotWebConfTextParameter hostnameParam = IotWebConfTextParameter("Hostname", "hostname", hostname, STRING_LEN, "Zirkulationspumpe");
 IotWebConfParameterGroup mqttGroup = IotWebConfParameterGroup("mqtt", "MQTT configuration");
 IotWebConfTextParameter mqttServerParam = IotWebConfTextParameter("MQTT server", "mqttServer", mqttServer, STRING_LEN);
 IotWebConfTextParameter mqttUserNameParam = IotWebConfTextParameter("MQTT user", "mqttUser", mqttUser, STRING_LEN);
 IotWebConfPasswordParameter mqttUserPasswordParam = IotWebConfPasswordParameter("MQTT password", "mqttPassword", mqttPassword, STRING_LEN);
 IotWebConfParameterGroup ntpGroup = IotWebConfParameterGroup("ntp", "NTP configuration");
-IotWebConfTextParameter ntpServerParam = IotWebConfPasswordParameter("NTP Server", "ntpServer", ntpServer, STRING_LEN);
-IotWebConfTextParameter ntpTimezoneParam = IotWebConfPasswordParameter("NTP timezone", "ntpTimezone", ntpTimezone, STRING_LEN);
-
+IotWebConfTextParameter ntpServerParam = IotWebConfPasswordParameter("NTP Server", "ntpServer", ntpServer, STRING_LEN, "at.pool.ntp.org");
+IotWebConfTextParameter ntpTimezoneParam = IotWebConfPasswordParameter("NTP timezone", "ntpTimezone", ntpTimezone, STRING_LEN, "CET-1CEST,M3.5.0/02,M10.5.0/03");
 
 // -- SECTION: Wifi Manager
 void handleRoot()
@@ -134,7 +130,7 @@ void configSaved()
   needReset = true;
 }
 
-bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper)
+bool formValidator(iotwebconf::WebRequestWrapper *webRequestWrapper)
 {
   Serial.println("Validating form.");
   bool valid = true;
@@ -150,92 +146,166 @@ bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper)
 }
 
 //-- SECTION: connection handling
-void connectToMqtt() {
+void setTimezone(String timezone){
+  Serial.printf("  Setting Timezone to %s\n", ntpTimezone);
+  setenv("TZ", ntpTimezone, 1);  //  Now adjust the TZ.  Clock settings are adjusted to show the new local time
+  tzset();
+}
+
+void connectToMqtt()
+{
   Serial.println("Connecting to MQTT...");
   mqttClient.connect();
 }
 
-void onWifiConnected() {
+void onWifiConnected()
+{
   Serial.println("Connected to Wi-Fi.");
   Serial.println(WiFi.localIP());
   connectToMqtt();
   timeClient.begin();
 }
 
-void onWifiDisconnect(WiFiEvent_t event, WiFiEventInfo_t info) {
+void onWifiDisconnect(WiFiEvent_t event, WiFiEventInfo_t info)
+{
   Serial.println("Disconnected from Wi-Fi.");
   mqttReconnectTimer.detach(); // ensure we don't reconnect to MQTT while reconnecting to Wi-Fi
   timeClient.end();
 }
 
-void onMqttConnect(bool sessionPresent) {
+void onMqttConnect(bool sessionPresent)
+{
   Serial.println("Connected to MQTT.");
   Serial.print("Session present: ");
   Serial.println(sessionPresent);
   digitalWrite(LED_BUILTIN, HIGH);
 }
 
-void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
+void onMqttDisconnect(AsyncMqttClientDisconnectReason reason)
+{
   Serial.println("Disconnected from MQTT.");
   digitalWrite(LED_BUILTIN, LOW);
 
-  if (WiFi.isConnected()) {
+  if (WiFi.isConnected())
+  {
     mqttReconnectTimer.once(2, connectToMqtt);
   }
 }
 
-void onMqttPublish(uint16_t packetId) {
-  //Serial.print("Publish acknowledged.");
-  //Serial.print("  packetId: ");
-  //Serial.println(packetId);
+void onMqttPublish(uint16_t packetId)
+{
+  // Serial.print("Publish acknowledged.");
+  // Serial.print("  packetId: ");
+  // Serial.println(packetId);
 }
 //-- END SECTION: connection handling
+void checkSensors() {
+  if (sensors.getDeviceCount() == 2)
+  {
+    if (sensorError)
+      sensorError = false;
+      sensors.getAddress(sensor0_id, 0);
+      sensors.getAddress(sensor1_id, 1);
+      sensors.setResolution(sensor0_id, 12); // hohe Genauigkeit
+      sensors.setResolution(sensor1_id, 12); // hohe Genauigkeit
+  } else {
+    sensorError = true;
+  }
+}
 
+void getLocalTime(){
+  struct tm timeinfo;
+  if(!getLocalTime(&timeinfo)){
+    Serial.println("Failed to obtain time 1");
+    return;
+  }
+  localTime = timeinfo;
+}
 
-void updateDisplay() {
+void updateDisplay()
+{
   char tempOutStr[5];
   char tempRetStr[5];
-
+  unsigned int lineCnt = 1;
+  char buffer[6];
+  char uptimeStr[8];
   display.clear();
-  if (displayPage = 0) {
-    display.setFont(ArialMT_Plain_10);
-    display.setTextAlignment(TEXT_ALIGN_CENTER);
-    if (WiFi.isConnected()) {
-      display.drawString(0, 0, String(WiFi.localIP()));
-    } else {
-      display.drawString(0, 0, "nicht verbunden");
-    }
 
-    dtostrf(tempOut, 2, 2, tempOutStr);
-    dtostrf(tempRet, 2, 2, tempRetStr);
-    display.setTextAlignment(TEXT_ALIGN_LEFT);
-    display.drawString(0, 12, "Vorlauf: ");
-    display.drawString(64, 12, String(tempOutStr));
-    display.drawString(0, 24, "Rücklauf: ");
-    display.drawString(64, 24, String(tempRetStr));
+  switch (displayPage) {
+    case 0:
+      display.setFont(ArialMT_Plain_10);
+      display.setTextAlignment(TEXT_ALIGN_LEFT);
+      if (WiFi.isConnected())
+      {
+        display.drawString(0, 0, WiFi.localIP().toString());
+      }
+      else
+      {
+        display.drawString(0, 0, "nicht verbunden");
+      }
+      display.setTextAlignment(TEXT_ALIGN_RIGHT);
 
-    display.setFont(ArialMT_Plain_24);
-    display.drawString(0, 36, "Pumpe: ");
-    if (pumpRunning) {
-      display.invertDisplay();
-      display.drawString(64, 36, "an");
-    } else {
-      display.normalDisplay();
-      display.drawString(64, 36, "aus");
-    }
-  } else {  // Display Page 2 - last 5 pump starts
-    display.setTextAlignment(TEXT_ALIGN_LEFT);
-    display.setFont(ArialMT_Plain_10);
-    for(unsigned int cnt = pumpCnt;cnt++;cnt<=4 + pumpCnt) { //display last 5 pumpOn Events in right order
-      unsigned int pumpCntTemp;
-      if (cnt > 4) pumpCntTemp = cnt - 5; else pumpCntTemp = cnt;
-      display.println(pump[pumpCntTemp]);
-    }
+      // display.drawString(128, 0, timeClient.getFormattedTime() );
+      strftime(buffer, 6, "%H:%M", &localTime);
+      display.drawString(128, 0, buffer);
+      display.drawLine(0, 11, 128, 11);
+      display.setTextAlignment(TEXT_ALIGN_CENTER);
+      if (sensors.getDeviceCount() == 2)
+      {
+        dtostrf(tempOut, 2, 2, tempOutStr);
+        dtostrf(tempRet, 2, 2, tempRetStr);
+        display.drawString(64, 12, "Vorlauf: " + String(tempOutStr));
+        display.drawString(64, 24, "Rücklauf: "+ String(tempRetStr));
+      } else {
+        display.drawString(64, 12, "Vorlauf: ERROR!");
+        display.drawString(64, 24, "Rücklauf: ERROR!");
+      }
+      display.setFont(ArialMT_Plain_24);
+      display.setTextAlignment(TEXT_ALIGN_CENTER);
+      if (pumpRunning)
+      {
+        display.invertDisplay();
+        display.drawString(64, 36, "Pumpe an");
+      }
+      else
+      {
+        display.normalDisplay();
+        display.drawString(64, 36, "Pumpe aus");
+      }
+      break;
+    case 1:
+    // Display Page 2 - last 5 pump starts
+      display.setFont(ArialMT_Plain_10);
+      display.setTextAlignment(TEXT_ALIGN_CENTER);
+      display.drawString(64, 0, "Letzte Starts");
+      display.drawLine(0, 11, 128, 11);
+      for (unsigned int cnt = pumpCnt; cnt++; cnt <= 4 + pumpCnt)
+      { // display last 5 pumpOn Events in right order
+        unsigned int pumpCntTemp;
+        if (cnt > 4)
+          pumpCntTemp = cnt - 5;
+        else
+          pumpCntTemp = cnt;
+        display.drawString(64, lineCnt * 10 + 2, pump[pumpCntTemp]);
+        lineCnt++;
+      }
+      break;
+    case 2:
+      uptime::calculateUptime();
+      display.setTextAlignment(TEXT_ALIGN_CENTER);
+      display.setFont(ArialMT_Plain_16);
+      display.drawString(64, 0, "Laufzeit");
+      display.drawLine(0, 17, 128, 17);
+      display.drawString(64, 20, String(uptime::getDays()) + " Tage ");
+      sprintf(uptimeStr, "%02u:%02u:%02u", uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
+      display.drawString(64, 40, String(uptimeStr));
+      break;
   }
   display.display();
 }
 
-void pumpOn() {
+void pumpOn()
+{
   Serial.println("Turn on circulation");
   mqttClient.publish(MQTT_PUB_PUMP, 0, true, "1");
   pumpRunning = true;
@@ -245,10 +315,12 @@ void pumpOn() {
   timeClient.update();
   Serial.println(timeClient.getFormattedTime());
   pump[pumpCnt] = timeClient.getFormattedTime();
-  if(++pumpCnt >= 5) pumpCnt = 0;   //Reset counter
+  if (++pumpCnt >= 5)
+    pumpCnt = 0; // Reset counter
 }
 
-void pumpOff() {
+void pumpOff()
+{
   Serial.println("Turn off circulation");
   mqttClient.publish(MQTT_PUB_PUMP, 0, true, "0");
   pumpRunning = false;
@@ -256,62 +328,76 @@ void pumpOff() {
   digitalWrite(VALVEPIN, LOW);
 }
 
-void disinfection() {
+void disinfection()
+{
   pumpOn();
 }
 
-void check() {
+void check()
+{
   char msg_out[20];
-  sensors.requestTemperatures(); // Send the command to get temperatures
-  tempOut = sensors.getTempCByIndex(0);
-  tempRet = sensors.getTempCByIndex(1);
-  tempInt = sensors.getTempCByIndex(2);
-  Serial.print(" Temp Out: "); Serial.println(tempOut);
-  Serial.print(" Temp In: "); Serial.println(tempRet);
-  Serial.print(" Temp Int: "); Serial.println(tempInt);
-  dtostrf(tempOut, 2, 2, msg_out);
-  mqttClient.publish(MQTT_PUB_TEMP_OUT, 0, true, msg_out);
-  dtostrf(tempRet, 2, 2, msg_out);
-  mqttClient.publish(MQTT_PUB_TEMP_RET, 0, true, msg_out);
-  dtostrf(tempInt, 2, 2, msg_out);
-  mqttClient.publish(MQTT_PUB_TEMP_INT, 0, true, msg_out);
-
-  float temperatur_delta = 0.0;
-  if(++checkCnt >= 5) checkCnt = 0;   //Reset counter
-  t[checkCnt] = tempOut;
-  int cnt_alt = (checkCnt + 6) % 5;
-  if(!pumpRunning && tempRet < tempOut - 10.0) {  //start only if retern flow temp is 10 degree below temp out (hystersis)
-    temperatur_delta = t[checkCnt]-t[cnt_alt]; // Difference to 5 sec before
-    if(temperatur_delta >= 0.12) {        // smallest temp change is 0,12°C,
-      pumpOn();
-      disinfection24hTimer.attach(86400, disinfection);
+  timeClient.update();
+  getLocalTime();
+  if (sensorError) {
+    //Emergeny Mode if missing sensors
+    if ((localTime.tm_hour >= 6 && localTime.tm_hour < 23) && (localTime.tm_min >= 00 && localTime.tm_min < 10)) {
+      if (!pumpRunning) {pumpOn();}
+    } else {
+      if (pumpRunning) {pumpOff();}
     }
   } else {
-    if (tempRet > tempOut - 5.0) { //if return flow temp near temp out stop pump with a delay
-      pumpOff();
+    sensors.requestTemperatures(); // Send the command to get temperatures
+    tempOut = sensors.getTempCByIndex(0);
+    tempRet = sensors.getTempCByIndex(1);
+    Serial.print(" Temp Out: ");
+    Serial.println(tempOut);
+    Serial.print(" Temp In: ");
+    Serial.println(tempRet);
+    dtostrf(tempOut, 2, 2, msg_out);
+    mqttClient.publish(MQTT_PUB_TEMP_OUT, 0, true, msg_out);
+    dtostrf(tempRet, 2, 2, msg_out);
+    mqttClient.publish(MQTT_PUB_TEMP_RET, 0, true, msg_out);
+
+    float temperatur_delta = 0.0;
+    if (++checkCnt >= 5)
+      checkCnt = 0; // Reset counter
+    t[checkCnt] = tempOut;
+    int cnt_alt = (checkCnt + 6) % 5;
+    if (!pumpRunning && tempRet < tempOut - 10.0)
+    {                                              // start only if retern flow temp is 10 degree below temp out (hystersis)
+      temperatur_delta = t[checkCnt] - t[cnt_alt]; // Difference to 5 sec before
+      if (temperatur_delta >= 0.12)
+      { // smallest temp change is 0,12°C,
+        pumpOn();
+        disinfection24hTimer.attach(86400, disinfection);
+      }
+    }
+    else
+    {
+      if (pumpRunning && tempRet > tempOut - 5.0)
+      { // if return flow temp near temp out stop pump with a delay
+        pumpOff();
+      }
     }
   }
 }
 
-void setup() {
-  //basic setup
+void setup()
+{
+  // basic setup
   Serial.begin(115200);
   pinMode(LED_BUILTIN, OUTPUT);
   pinMode(PUMPPIN, OUTPUT);
   pinMode(VALVEPIN, OUTPUT);
-  pinMode(LEDPIN, OUTPUT);
   digitalWrite(PUMPPIN, LOW);
   digitalWrite(VALVEPIN, LOW);
-  digitalWrite(LEDPIN, LOW);
   digitalWrite(LED_BUILTIN, LOW);
 
   pinMode(DISPLAYPIN, INPUT_PULLUP);
   pinMode(WIFICONFIGPIN, INPUT_PULLUP);
 
-  // configure the timezone
-  configTime(0, 0, ntpServer);
-  setenv("TZ", ntpTimezone, 1); // Set environment variable with your time zone
-  tzset();
+  display.init();
+  display.setFont(ArialMT_Plain_10);
 
   // WiFi.onEvent(onWifiConnected, ARDUINO_EVENT_WIFI_STA_CONNECTED);
   WiFi.onEvent(onWifiDisconnect, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
@@ -329,7 +415,6 @@ void setup() {
   iotWebConf.setConfigSavedCallback(&configSaved);
   iotWebConf.setFormValidator(&formValidator);
   iotWebConf.setWifiConnectionCallback(&onWifiConnected);
-  iotWebConf.setStatusPin(LEDPIN);
   iotWebConf.setConfigPin(WIFICONFIGPIN);
   iotWebConf.init();
   // -- Set up required URL handlers on the web server.
@@ -343,51 +428,51 @@ void setup() {
 
   // -- Set up required URL handlers on the web server.
   server.on("/", handleRoot);
-  server.on("/config", []{ iotWebConf.handleConfig(); });
-  server.onNotFound([](){ iotWebConf.handleNotFound(); });
+  server.on("/config", []
+            { iotWebConf.handleConfig(); });
+  server.onNotFound([]()
+                    { iotWebConf.handleNotFound(); });
   Serial.println("Wifi manager ready.");
 
   mqttClient.onConnect(onMqttConnect);
   mqttClient.onDisconnect(onMqttDisconnect);
   mqttClient.onPublish(onMqttPublish);
-  if (mqttUser != "") mqttClient.setCredentials(mqttUser, mqttPassword);
+  if (mqttUser != "")
+    mqttClient.setCredentials(mqttUser, mqttPassword);
   mqttClient.setServer(mqttServer, MQTT_PORT);
 
-  display.init();
-  display.setFont(ArialMT_Plain_10);
-
   sensors.begin();
-  Serial.print("Found ");
-  Serial.print(sensors.getDeviceCount(), DEC);
-  Serial.println(" devices.");
-  sensors.getAddress(sensor0_id, 0);
-  sensors.getAddress(sensor1_id, 1);
-  sensors.setResolution(sensor0_id, 12); //hohe Genauigkeit
-  sensors.setResolution(sensor1_id, 12); //hohe Genauigkeit
+  sensorError = true;
+  checkSensors();
+
+  // configure the timezone
+  configTime(0, 0, ntpServer);
+  setTimezone(ntpTimezone);
 
   // Init OTA function
-  ArduinoOTA.onStart([]() {
+  ArduinoOTA.onStart([]()
+                     {
     Serial.println("Start OTA");
     display.clear();
     display.setFont(ArialMT_Plain_10);
     display.setTextAlignment(TEXT_ALIGN_CENTER_BOTH);
     display.drawString(display.getWidth() / 2, display.getHeight() / 2 - 10, "OTA Update");
-    display.display();
-  });
-  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    display.display(); });
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total)
+                        {
     Serial.printf("OTA Progress: %u%%\r", (progress / (total / 100)));
     display.drawProgressBar(4, 32, 120, 8, progress / (total / 100) );
-    display.display();
-  });
-  ArduinoOTA.onEnd([]() {
+    display.display(); });
+  ArduinoOTA.onEnd([]()
+                   {
     Serial.println("\nEnd OTA");
     display.clear();
     display.setFont(ArialMT_Plain_10);
     display.setTextAlignment(TEXT_ALIGN_CENTER_BOTH);
     display.drawString(display.getWidth() / 2, display.getHeight() / 2, "Restart");
-    display.display();
-  });
-  ArduinoOTA.onError([](ota_error_t error) {
+    display.display(); });
+  ArduinoOTA.onError([](ota_error_t error)
+                     {
     Serial.printf("Error[%u]: ", error);
     if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
     else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
@@ -396,8 +481,7 @@ void setup() {
     else if (error == OTA_END_ERROR) Serial.println("End Failed");
     display.clear();
     display.setFont(ArialMT_Plain_24);
-    display.drawString(display.getWidth() / 2, display.getHeight() / 2, "OTA Failed");
-  });
+    display.drawString(display.getWidth() / 2, display.getHeight() / 2, "OTA Failed"); });
   ArduinoOTA.begin();
   Serial.println("OTA Ready");
   Serial.println(WiFi.localIP());
@@ -408,7 +492,8 @@ void setup() {
   updateDisplayTimer.attach(1, updateDisplay);
 }
 
-void loop() {
+void loop()
+{
   iotWebConf.doLoop();
   ArduinoOTA.handle();
 
@@ -425,8 +510,10 @@ void loop() {
   {
     iotWebConfPinState = 1 - iotWebConfPinState; // invert pin state as it is changed
     iotWebConfLastChanged = now;
-    if (iotWebConfPinState) {  //reset settings and reboot
-      iotWebConf.resetWifiAuthInfo();
+    if (iotWebConfPinState)
+    { // reset settings and reboot
+      iotWebConf.getRootParameterGroup()->applyDefaultValue();
+      iotWebConf.saveConfig();
       needReset = true;
     }
   }
@@ -434,8 +521,13 @@ void loop() {
   {
     displayPinState = 1 - displayPinState; // invert pin state as it is changed
     displayLastChanged = now;
-    if (displayPinState) {
-      if (displayPage == 0) displayPage = 1; else displayPage = 0;
+    if (displayPinState)
+    {
+      if (displayPage == 2)
+        displayPage = 0;
+      else
+        displayPage++;
     }
   }
+  if (displayLastChanged > 600000) {displayPage = 0;} //Jump back to Homepage after 10 minutes
 }
