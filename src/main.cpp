@@ -9,6 +9,7 @@
 #include <ArduinoOTA.h>
 #include <IotWebConf.h>
 #include <IotWebConfUsing.h>
+#include <IotWebConfTParameter.h>
 #include <NTPClient.h>
 #include <WiFiUdp.h>
 #include <time.h>
@@ -28,8 +29,10 @@ OneWire oneWire(ONEWIREPIN);
 
 // Pass our oneWire reference to Dallas Temperature sensor
 DallasTemperature sensors(&oneWire);
-DeviceAddress sensor0_id;
-DeviceAddress sensor1_id;
+DeviceAddress sensorOut_id;
+DeviceAddress sensorRet_id;
+DeviceAddress sensorInt_id;
+bool sensorDetectionError = false;
 bool sensorError = false;
 
 // OLED Display
@@ -48,6 +51,7 @@ bool needReset = false;
 #define MQTT_PORT 1883
 #define MQTT_PUB_TEMP_OUT "ww/ht/dhw_Tflow_measured"
 #define MQTT_PUB_TEMP_RET "ww/ht/dhw_Treturn"
+#define MQTT_PUB_TEMP_INT "ww/ht/Tint"
 #define MQTT_PUB_PUMP "ww/ht/dhw_pump_circulation"
 #define MQTT_PUB_INFO "ww/ht/dhw_info"
 AsyncMqttClient mqttClient;
@@ -72,6 +76,7 @@ static float t[] = {0.0, 0.0, 0.0, 0.0, 0.0}; // letzten 5 Temepraturwerte speic
 bool pumpRunning = false;
 float tempOut;
 float tempRet;
+float tempInt;
 unsigned int checkCnt;
 IPAddress localIP;
 
@@ -80,6 +85,8 @@ int iotWebConfPinState = HIGH;
 unsigned long iotWebConfLastChanged = 0;
 DNSServer dnsServer;
 WebServer server(80);
+static const char chooserValues[][STRING_LEN] = { "0", "1", "2" };
+static const char chooserNames[][STRING_LEN] = { "Sensor 1", "Sensor 2", "Sensor 3" };
 IotWebConf iotWebConf("Zirkulationspumpe", &dnsServer, &server, "");
 IotWebConfParameterGroup networkGroup = IotWebConfParameterGroup("network", "Network configuration");
 IotWebConfTextParameter hostnameParam = IotWebConfTextParameter("Hostname", "hostname", hostname, STRING_LEN, "Zirkulationspumpe");
@@ -88,8 +95,36 @@ IotWebConfTextParameter mqttServerParam = IotWebConfTextParameter("MQTT server",
 IotWebConfTextParameter mqttUserNameParam = IotWebConfTextParameter("MQTT user", "mqttUser", mqttUser, STRING_LEN);
 IotWebConfPasswordParameter mqttUserPasswordParam = IotWebConfPasswordParameter("MQTT password", "mqttPassword", mqttPassword, STRING_LEN);
 IotWebConfParameterGroup ntpGroup = IotWebConfParameterGroup("ntp", "NTP configuration");
-IotWebConfTextParameter ntpServerParam = IotWebConfPasswordParameter("NTP Server", "ntpServer", ntpServer, STRING_LEN, "at.pool.ntp.org");
-IotWebConfTextParameter ntpTimezoneParam = IotWebConfPasswordParameter("NTP timezone", "ntpTimezone", ntpTimezone, STRING_LEN, "CET-1CEST,M3.5.0/02,M10.5.0/03");
+IotWebConfTextParameter ntpServerParam = IotWebConfTextParameter("NTP Server", "ntpServer", ntpServer, STRING_LEN, "at.pool.ntp.org");
+IotWebConfTextParameter ntpTimezoneParam = IotWebConfTextParameter("NTP timezone", "ntpTimezone", ntpTimezone, STRING_LEN, "CET-1CEST,M3.5.0/02,M10.5.0/03");
+IotWebConfParameterGroup tempGroup = IotWebConfParameterGroup("temp", "DS18B20 configuration");
+iotwebconf::SelectTParameter<STRING_LEN> tempOutParam =
+   iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempOutParam").
+   label("Sensor Out").
+   optionValues((const char*)chooserValues).
+   optionNames((const char*)chooserNames).
+   optionCount(sizeof(chooserValues) / STRING_LEN).
+   nameLength(STRING_LEN).
+   defaultValue("1").
+   build();
+iotwebconf::SelectTParameter<STRING_LEN> tempRetParam =
+   iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempRetParam").
+   label("Sensor Return").
+   optionValues((const char*)chooserValues).
+   optionNames((const char*)chooserNames).
+   optionCount(sizeof(chooserValues) / STRING_LEN).
+   nameLength(STRING_LEN).
+   defaultValue("2").
+   build();
+iotwebconf::SelectTParameter<STRING_LEN> tempIntParam =
+   iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempIntParam").
+   label("Sensor Internal").
+   optionValues((const char*)chooserValues).
+   optionNames((const char*)chooserNames).
+   optionCount(sizeof(chooserValues) / STRING_LEN).
+   nameLength(STRING_LEN).
+   defaultValue("3").
+   build();
 
 // -- SECTION: Wifi Manager
 void handleRoot()
@@ -117,7 +152,14 @@ void handleRoot()
   s += "<li>NTP Timezone: ";
   s += ntpTimezone;
   s += "</li>";
-  s += "</ul>";
+  s += "</ul>Sensors<ul>";
+  s += "<li>Sensor Out: ";
+  s += tempOutParam.value();
+  s += "<li>Sensor Return: ";
+  s += tempRetParam.value();
+  s += "<li>Sensor Internal: ";
+  s += tempIntParam.value();
+  s += "</li>";
   s += "Go to <a href='config'>Configuration</a>";
   s += "</body></html>\n";
 
@@ -200,17 +242,42 @@ void onMqttPublish(uint16_t packetId)
 }
 //-- END SECTION: connection handling
 void checkSensors() {
-  if (sensors.getDeviceCount() == 2)
-  {
-    if (sensorError)
-      sensorError = false;
-      sensors.getAddress(sensor0_id, 0);
-      sensors.getAddress(sensor1_id, 1);
-      sensors.setResolution(sensor0_id, 12); // hohe Genauigkeit
-      sensors.setResolution(sensor1_id, 12); // hohe Genauigkeit
-  } else {
+  if (sensorDetectionError) {
     sensorError = true;
+  } else {
+    if (sensors.isConnected(sensorInt_id) && sensors.isConnected(sensorInt_id) && sensors.isConnected(sensorInt_id)) 
+    {
+      if (sensorError)
+        sensorError = false;      
+        sensors.setResolution(sensorOut_id, 12); // hohe Genauigkeit
+        sensors.setResolution(sensorRet_id, 12); // hohe Genauigkeit
+    } else {
+      sensorError = true;
+    }
   }
+}
+
+void printAddress(DeviceAddress deviceAddress)
+{
+  for (uint8_t i = 0; i < 8; i++)
+  {
+    if (deviceAddress[i] < 16) Serial.print("0");
+    Serial.print(deviceAddress[i], HEX);
+  }
+  Serial.println("");
+}
+
+// function to format a device address
+String formatAdress(DeviceAddress deviceAddress)
+{
+  String adr;
+  for (uint8_t i = 0; i < 8; i++)
+  {
+    // zero pad the address if necessary
+    if (deviceAddress[i] < 16 ) adr=adr+"0";
+    adr=adr+String(deviceAddress[i], HEX);
+  }
+  return adr;
 }
 
 void getLocalTime(){
@@ -224,11 +291,15 @@ void getLocalTime(){
 
 void updateDisplay()
 {
-  char tempOutStr[5];
-  char tempRetStr[5];
+  char tempStr[5];
   unsigned int lineCnt = 1;
   char buffer[6];
   char uptimeStr[8];
+  float temp;
+  DeviceAddress sensor1_id;
+  DeviceAddress sensor2_id;
+  DeviceAddress sensor3_id;
+
   display.clear();
 
   switch (displayPage) {
@@ -250,16 +321,20 @@ void updateDisplay()
       display.drawString(128, 0, buffer);
       display.drawLine(0, 11, 128, 11);
       display.setTextAlignment(TEXT_ALIGN_CENTER);
-      if (sensors.getDeviceCount() == 2)
-      {
-        dtostrf(tempOut, 2, 2, tempOutStr);
-        dtostrf(tempRet, 2, 2, tempRetStr);
-        display.drawString(64, 12, "Vorlauf: " + String(tempOutStr));
-        display.drawString(64, 24, "Rücklauf: "+ String(tempRetStr));
+      if (sensorDetectionError) {
+        display.setFont(ArialMT_Plain_16);
+        display.drawString(64, 14, "Sensorfehler!");
       } else {
-        display.drawString(64, 12, "Vorlauf: ERROR!");
-        display.drawString(64, 24, "Rücklauf: ERROR!");
+        if (sensors.isConnected(sensorOut_id)) {
+          dtostrf(tempOut, 2, 2, tempStr);
+          display.drawString(64, 12, "Vorlauf: " + String(tempStr) + " C°");
+        } else display.drawString(64, 12, "Vorlauf: ERROR!");
+        if (sensors.isConnected(sensorRet_id)) {
+          dtostrf(tempRet, 2, 2, tempStr);
+          display.drawString(64, 24, "Rücklauf: "+ String(tempStr) + " C°");
+        } else display.drawString(64, 24, "Rücklauf: ERROR!");
       }
+
       display.setFont(ArialMT_Plain_24);
       display.setTextAlignment(TEXT_ALIGN_CENTER);
       if (pumpRunning)
@@ -293,13 +368,62 @@ void updateDisplay()
     case 2:
       uptime::calculateUptime();
       display.setTextAlignment(TEXT_ALIGN_CENTER);
-      display.setFont(ArialMT_Plain_16);
+      display.setFont(ArialMT_Plain_10);
       display.drawString(64, 0, "Laufzeit");
-      display.drawLine(0, 17, 128, 17);
-      display.drawString(64, 20, String(uptime::getDays()) + " Tage ");
+      display.drawLine(0, 11, 128, 11); 
+      display.setFont(ArialMT_Plain_16);      
+      display.drawString(64, 24, String(uptime::getDays()) + " Tage ");
       sprintf(uptimeStr, "%02u:%02u:%02u", uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
-      display.drawString(64, 40, String(uptimeStr));
+      display.drawString(64, 44, String(uptimeStr));
       break;
+    case 3:
+      display.setFont(ArialMT_Plain_10);
+      display.setTextAlignment(TEXT_ALIGN_CENTER);
+      display.drawString(64, 0, "Sensoren");      
+      display.drawLine(0, 11, 128, 11); 
+      display.setFont(ArialMT_Plain_16);
+      if (sensors.getAddress(sensor1_id, 0)) {
+        temp = sensors.getTempC(sensor1_id);
+        dtostrf(temp, 2, 2, tempStr);
+        display.drawString(64, 12, "1: " + String(tempStr) + "C°");
+      } else display.drawString(64, 12, "1: kein Sensor");
+      if (sensors.getAddress(sensor2_id, 1)) {
+        temp = sensors.getTempC(sensor2_id);
+        dtostrf(temp, 2, 2, tempStr);
+        display.drawString(64, 30, "2: " + String(tempStr) + "C°");
+      } else display.drawString(64, 30, "2: kein Sensor");
+      if (sensors.getAddress(sensor3_id, 2)) {
+        temp = sensors.getTempC(sensor3_id);
+        dtostrf(temp, 2, 2, tempStr);
+        display.drawString(64, 48, "3: " + String(tempStr) + "C°");
+      } else display.drawString(64, 48, "3: kein Sensor");
+      break;
+    case 4:
+      display.setFont(ArialMT_Plain_10);
+      display.setTextAlignment(TEXT_ALIGN_CENTER);
+      display.drawString(64, 0, String(sensors.getDeviceCount()) + " DS18B20 Device(s)");      
+      display.drawLine(0, 11, 128, 11);       
+      if (sensors.getAddress(sensor1_id, 0)) {
+        printAddress(sensor1_id);
+        display.drawString(64, 14, "1: " + formatAdress(sensor1_id));
+      } else {
+        Serial.println("Unable to find address for Sensor 1"); 
+        display.drawString(64, 14, "1: kein Sensor");
+      }
+      if (sensors.getAddress(sensor2_id, 1)) {
+        printAddress(sensor2_id);
+        display.drawString(64, 32, "2: " + formatAdress(sensor2_id));
+      } else {
+        Serial.println("Unable to find address for Sensor 2");
+        display.drawString(64, 32, "2: kein Sensor");
+      }
+      if (sensors.getAddress(sensor3_id, 2)) {        
+        printAddress(sensor3_id);    
+        display.drawString(64, 50, "3: " + formatAdress(sensor3_id));
+      } else {
+        Serial.println("Unable to find address for Sensor 3");
+        display.drawString(64, 50, "3: kein Sensor");
+      }    
   }
   display.display();
 }
@@ -309,8 +433,8 @@ void pumpOn()
   Serial.println("Turn on circulation");
   mqttClient.publish(MQTT_PUB_PUMP, 0, true, "1");
   pumpRunning = true;
-  digitalWrite(PUMPPIN, HIGH);
-  digitalWrite(VALVEPIN, HIGH);
+  digitalWrite(PUMPPIN, LOW);
+  //digitalWrite(VALVEPIN, HIGH);
 
   timeClient.update();
   Serial.println(timeClient.getFormattedTime());
@@ -324,8 +448,8 @@ void pumpOff()
   Serial.println("Turn off circulation");
   mqttClient.publish(MQTT_PUB_PUMP, 0, true, "0");
   pumpRunning = false;
-  digitalWrite(PUMPPIN, LOW);
-  digitalWrite(VALVEPIN, LOW);
+  digitalWrite(PUMPPIN, HIGH);
+  // digitalWrite(VALVEPIN, LOW);
 }
 
 void disinfection()
@@ -346,17 +470,22 @@ void check()
       if (pumpRunning) {pumpOff();}
     }
   } else {
-    sensors.requestTemperatures(); // Send the command to get temperatures
-    tempOut = sensors.getTempCByIndex(0);
-    tempRet = sensors.getTempCByIndex(1);
+    sensors.requestTemperatures(); // Send the command to get temperatures    
+    tempOut = sensors.getTempC(sensorOut_id);
+    tempRet = sensors.getTempC(sensorRet_id);
+    tempInt = sensors.getTempC(sensorInt_id);
     Serial.print(" Temp Out: ");
     Serial.println(tempOut);
     Serial.print(" Temp In: ");
     Serial.println(tempRet);
+    Serial.print(" Temp Int: ");
+    Serial.println(tempInt);
     dtostrf(tempOut, 2, 2, msg_out);
     mqttClient.publish(MQTT_PUB_TEMP_OUT, 0, true, msg_out);
     dtostrf(tempRet, 2, 2, msg_out);
     mqttClient.publish(MQTT_PUB_TEMP_RET, 0, true, msg_out);
+    dtostrf(tempInt, 2, 2, msg_out);
+    mqttClient.publish(MQTT_PUB_TEMP_INT, 0, true, msg_out);
 
     float temperatur_delta = 0.0;
     if (++checkCnt >= 5)
@@ -389,8 +518,8 @@ void setup()
   pinMode(LED_BUILTIN, OUTPUT);
   pinMode(PUMPPIN, OUTPUT);
   pinMode(VALVEPIN, OUTPUT);
-  digitalWrite(PUMPPIN, LOW);
-  digitalWrite(VALVEPIN, LOW);
+  digitalWrite(PUMPPIN, HIGH);
+  digitalWrite(VALVEPIN, HIGH);
   digitalWrite(LED_BUILTIN, LOW);
 
   pinMode(DISPLAYPIN, INPUT_PULLUP);
@@ -403,6 +532,7 @@ void setup()
   WiFi.onEvent(onWifiDisconnect, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   WiFi.setAutoReconnect(true);
   WiFi.setHostname(hostname);
+  
   networkGroup.addItem(&hostnameParam);
   iotWebConf.addParameterGroup(&networkGroup);
   mqttGroup.addItem(&mqttServerParam);
@@ -412,6 +542,11 @@ void setup()
   ntpGroup.addItem(&ntpServerParam);
   ntpGroup.addItem(&ntpTimezoneParam);
   iotWebConf.addParameterGroup(&ntpGroup);
+  tempGroup.addItem(&tempOutParam);
+  tempGroup.addItem(&tempRetParam);
+  tempGroup.addItem(&tempIntParam);
+  iotWebConf.addParameterGroup(&tempGroup);
+  
   iotWebConf.setConfigSavedCallback(&configSaved);
   iotWebConf.setFormValidator(&formValidator);
   iotWebConf.setWifiConnectionCallback(&onWifiConnected);
@@ -434,6 +569,7 @@ void setup()
                     { iotWebConf.handleNotFound(); });
   Serial.println("Wifi manager ready.");
 
+
   mqttClient.onConnect(onMqttConnect);
   mqttClient.onDisconnect(onMqttDisconnect);
   mqttClient.onPublish(onMqttPublish);
@@ -442,7 +578,14 @@ void setup()
   mqttClient.setServer(mqttServer, MQTT_PORT);
 
   sensors.begin();
-  sensorError = true;
+  // locate devices on the bus
+  Serial.print("Locating devices...");
+  Serial.print("Found ");
+  Serial.print(sensors.getDeviceCount(), DEC);
+  Serial.println(" devices.");
+  if (!sensors.getAddress(sensorOut_id, atol(tempOutParam.value()))) sensorDetectionError = true;  
+  if (!sensors.getAddress(sensorRet_id, atol(tempRetParam.value()))) sensorDetectionError = true;  
+  if (!sensors.getAddress(sensorInt_id, atol(tempIntParam.value()))) sensorDetectionError = true; 
   checkSensors();
 
   // configure the timezone
@@ -523,7 +666,7 @@ void loop()
     displayLastChanged = now;
     if (displayPinState)
     {
-      if (displayPage == 2)
+      if (displayPage == 4)
         displayPage = 0;
       else
         displayPage++;
