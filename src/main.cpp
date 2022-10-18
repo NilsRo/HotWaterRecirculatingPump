@@ -53,7 +53,7 @@ bool needReset = false;
 #define MQTT_PUB_TEMP_RET "ww/ht/dhw_Treturn"
 #define MQTT_PUB_TEMP_INT "ww/ht/Tint"
 #define MQTT_PUB_PUMP "ww/ht/dhw_pump_circulation"
-#define MQTT_PUB_INFO "ww/ht/dhw_info"
+#define MQTT_PUB_INFO "ww/ht/info"
 AsyncMqttClient mqttClient;
 
 Ticker mqttReconnectTimer;
@@ -243,15 +243,18 @@ void onMqttPublish(uint16_t packetId)
 //-- END SECTION: connection handling
 void checkSensors() {
   if (sensorDetectionError) {
+    mqttClient.publish(MQTT_PUB_INFO, 0, true, "Sensorfehler");
     sensorError = true;
   } else {
     if (sensors.isConnected(sensorInt_id) && sensors.isConnected(sensorInt_id) && sensors.isConnected(sensorInt_id)) 
     {
       if (sensorError)
-        sensorError = false;      
+        mqttClient.publish(MQTT_PUB_INFO, 0, true, "Sensorfehler behoben");
+        sensorError = false; 
         sensors.setResolution(sensorOut_id, 12); // hohe Genauigkeit
         sensors.setResolution(sensorRet_id, 12); // hohe Genauigkeit
     } else {
+      mqttClient.publish(MQTT_PUB_INFO, 0, true, "Sensorfehler");
       sensorError = true;
     }
   }
