@@ -40,6 +40,7 @@ SSD1306Wire display(0x3C, SDA, SCL); // ADDRESS, SDA, SCL  -  SDA and SCL usuall
 unsigned int displayPage = 0;
 int displayPinState = HIGH;
 unsigned long displayLastChanged = 0;
+bool displayOn = true;
 
 char mqttServer[STRING_LEN];
 char mqttUser[STRING_LEN];
@@ -58,8 +59,8 @@ AsyncMqttClient mqttClient;
 
 Ticker mqttReconnectTimer;
 Ticker disinfection24hTimer;
-Ticker checkTimer;
-Ticker updateDisplayTimer;
+Ticker secTimer;
+Ticker publishUptimeTimer;
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP);
@@ -292,11 +293,18 @@ void getLocalTime(){
   localTime = timeinfo;
 }
 
+void publishUptime() {
+  char msg_out[20];
+  uptime::calculateUptime();
+  sprintf(msg_out, "%03u Tage %02u:%02u:%02u", uptime::getDays(), uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
+  Serial.println(msg_out);
+  mqttClient.publish(MQTT_PUB_INFO, 0, true, msg_out);
+}
+
 void updateDisplay()
 {
-  char tempStr[5];
+  char tempStr[128];
   unsigned int lineCnt = 1;
-  char buffer[6];
   char uptimeStr[8];
   float temp;
   DeviceAddress sensor1_id;
@@ -309,19 +317,31 @@ void updateDisplay()
     case 0:
       display.setFont(ArialMT_Plain_10);
       display.setTextAlignment(TEXT_ALIGN_LEFT);
-      if (WiFi.isConnected())
-      {
-        display.drawString(0, 0, WiFi.localIP().toString());
+      switch (iotWebConf.getState()) {
+        case 0:
+          display.drawString(0, 0, "Booting");
+          break;
+        case 1:
+          display.drawString(0, 0, "Setup");  
+          break;
+        case 2:
+          display.drawString(0, 0, "AP");  
+          break;
+        case 3:
+          display.drawString(0, 0, "Verbinde");  
+          break;
+        case 4:
+          display.drawString(0, 0, "Online (" + String(WiFi.RSSI()) + ")");  
+          break;
+        case 5:
+          display.drawString(0, 0, "Offline");  
+          break;
       }
-      else
-      {
-        display.drawString(0, 0, "nicht verbunden");
-      }
-      display.setTextAlignment(TEXT_ALIGN_RIGHT);
 
+      display.setTextAlignment(TEXT_ALIGN_RIGHT);
       // display.drawString(128, 0, timeClient.getFormattedTime() );
-      strftime(buffer, 6, "%H:%M", &localTime);
-      display.drawString(128, 0, buffer);
+      strftime(tempStr, 6, "%H:%M", &localTime);
+      display.drawString(128, 0, tempStr);
       display.drawLine(0, 11, 128, 11);
       display.setTextAlignment(TEXT_ALIGN_CENTER);
       if (sensorDetectionError) {
@@ -351,23 +371,23 @@ void updateDisplay()
         display.drawString(64, 36, "Pumpe aus");
       }
       break;
-    case 1:
-    // Display Page 2 - last 5 pump starts
-      display.setFont(ArialMT_Plain_10);
-      display.setTextAlignment(TEXT_ALIGN_CENTER);
-      display.drawString(64, 0, "Letzte Starts");
-      display.drawLine(0, 11, 128, 11);
-      for (unsigned int cnt = pumpCnt; cnt++; cnt <= 4 + pumpCnt)
-      { // display last 5 pumpOn Events in right order
-        unsigned int pumpCntTemp;
-        if (cnt > 4)
-          pumpCntTemp = cnt - 5;
-        else
-          pumpCntTemp = cnt;
-        display.drawString(64, lineCnt * 10 + 2, pump[pumpCntTemp]);
-        lineCnt++;
-      }
-      break;
+    // case 1:
+    // // Display Page 2 - last 5 pump starts
+    //   display.setFont(ArialMT_Plain_10);
+    //   display.setTextAlignment(TEXT_ALIGN_CENTER);
+    //   display.drawString(64, 0, "Letzte Starts");
+    //   display.drawLine(0, 11, 128, 11);
+    //   for (unsigned int cnt = pumpCnt; cnt++; cnt <= 4 + pumpCnt)
+    //   { // display last 5 pumpOn Events in right order
+    //     unsigned int pumpCntTemp;
+    //     if (cnt > 4)
+    //       pumpCntTemp = cnt - 5;
+    //     else
+    //       pumpCntTemp = cnt;
+    //     display.drawString(64, lineCnt * 10 + 2, pump[pumpCntTemp]);
+    //     lineCnt++;
+    //   }
+    //   break;
     case 2:
       uptime::calculateUptime();
       display.setTextAlignment(TEXT_ALIGN_CENTER);
@@ -426,7 +446,85 @@ void updateDisplay()
       } else {
         Serial.println("Unable to find address for Sensor 3");
         display.drawString(64, 50, "3: kein Sensor");
-      }    
+      }
+      break;
+    case 5:
+      display.setFont(ArialMT_Plain_10);
+      display.setTextAlignment(TEXT_ALIGN_CENTER);
+      display.drawString(64, 0, "WiFi Status");      
+      display.drawLine(0, 11, 128, 11);
+      switch (iotWebConf.getState()) {
+        case 0:
+          display.drawString(64, 12, "Booting");
+          break;
+        case 1:
+          display.drawString(64, 12, "Nicht konfiguriert");  
+          break;
+        case 2:
+          display.drawString(64, 12, "AP");  
+          break;
+        case 3:
+          display.drawString(64, 12, "Verbinde...");  
+          break;
+        case 4:
+          display.drawString(64, 12, "Online");  
+          break;
+        case 5:
+          display.drawString(64, 12, "Offline");  
+          break;
+      }
+      display.drawString(64, 22, "SSID: " + WiFi.SSID());
+      display.drawString(64, 32, "RSSI: " + String(WiFi.RSSI()));
+      display.drawString(64, 42, "Sendeistung: " + String(WiFi.getTxPower()));
+      if (WiFi.isConnected())
+      {
+        display.drawString(64, 52, WiFi.localIP().toString());
+      }
+      else
+      {
+        display.drawString(64, 42, "keine IP");
+      }
+      break;
+    case 6:
+      display.setFont(ArialMT_Plain_10);
+      display.setTextAlignment(TEXT_ALIGN_CENTER);
+      display.drawString(64, 0, "WiFi Netzwerke TOP 5");      
+      display.drawLine(0, 11, 128, 11);
+      if (iotWebConf.getState() == 4) {
+        display.setFont(ArialMT_Plain_16);
+        display.drawString(64, 12, "WiFi bereits");      
+        display.drawString(64, 30, "verbunden");      
+      } else {
+        display.setFont(ArialMT_Plain_24);
+        display.drawString(64, 14, "Suche...");      
+        iotWebConf.goOffLine();
+          // WiFi.scanNetworks will return the number of networks found
+        int n = WiFi.scanNetworks();
+        Serial.println("scan done");
+        if (n == 0) {
+            Serial.println("no networks found");
+            display.setFont(ArialMT_Plain_16);
+            display.drawString(64, 14, "Keine APs");      
+        } else {
+          Serial.print(n);
+          Serial.println(" networks found");
+          for (int i = 0; i < n; ++i) {
+            // Print SSID and RSSI for each network found
+            Serial.print(i + 1);
+            Serial.print(": ");
+            Serial.print(WiFi.SSID(i));
+            Serial.print(" (");
+            Serial.print(WiFi.RSSI(i));
+            Serial.print(")");
+            Serial.println((WiFi.encryptionType(i) == WIFI_AUTH_OPEN)?" ":"*");
+            if (i < 5) {
+              display.setFont(ArialMT_Plain_10);
+              display.drawString(64, 12, String(WiFi.SSID(i)) + " (" + String(WiFi.RSSI(i) + ")"));      
+            }
+          }
+        }
+        iotWebConf.goOnLine();          
+      }
   }
   display.display();
 }
@@ -465,6 +563,7 @@ void check()
   char msg_out[20];
   timeClient.update();
   getLocalTime();
+
   if (sensorError) {
     //Emergeny Mode if missing sensors
     if ((localTime.tm_hour >= 6 && localTime.tm_hour < 23) && (localTime.tm_min >= 00 && localTime.tm_min < 10)) {
@@ -512,6 +611,11 @@ void check()
       }
     }
   }
+}
+
+void onSecTimer() {
+  check();
+  updateDisplay();
 }
 
 void setup()
@@ -634,8 +738,8 @@ void setup()
 
   // Timers
   disinfection24hTimer.attach(86400, disinfection);
-  checkTimer.attach(1, check);
-  updateDisplayTimer.attach(1, updateDisplay);
+  secTimer.attach(1, onSecTimer);
+  publishUptimeTimer.attach(10, publishUptime);
 }
 
 void loop()
@@ -656,8 +760,7 @@ void loop()
   {
     iotWebConfPinState = 1 - iotWebConfPinState; // invert pin state as it is changed
     iotWebConfLastChanged = now;
-    if (iotWebConfPinState)
-    { // reset settings and reboot
+    if (iotWebConfPinState) { // reset settings and reboot
       iotWebConf.getRootParameterGroup()->applyDefaultValue();
       iotWebConf.saveConfig();
       needReset = true;
@@ -667,13 +770,20 @@ void loop()
   {
     displayPinState = 1 - displayPinState; // invert pin state as it is changed
     displayLastChanged = now;
-    if (displayPinState)
-    {
-      if (displayPage == 4)
-        displayPage = 0;
-      else
-        displayPage++;
+    if (displayPinState) {  //button pressed action
+      if (!displayOn) {
+        display.displayOn();
+        displayOn = true;
+      } else {
+        if (displayPage == 6)
+          displayPage = 0;
+        else
+          displayPage++;
+      }
     }
   }
-  if (displayLastChanged > 600000) {displayPage = 0;} //Jump back to Homepage after 10 minutes
+  if (displayLastChanged > 600000) { //switch display off after 10mins
+    display.displayOff();
+    displayOn = false;
+  }
 }
