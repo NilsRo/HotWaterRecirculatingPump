@@ -10,6 +10,7 @@
 #include <IotWebConf.h>
 #include <IotWebConfUsing.h>
 #include <IotWebConfTParameter.h>
+#include <IotWebConfESP32HTTPUpdateServer.h>
 #include <NTPClient.h>
 #include <WiFiUdp.h>
 #include <time.h>
@@ -86,9 +87,10 @@ int iotWebConfPinState = HIGH;
 unsigned long iotWebConfLastChanged = 0;
 DNSServer dnsServer;
 WebServer server(80);
+HTTPUpdateServer httpUpdater;
 static const char chooserValues[][STRING_LEN] = { "0", "1", "2" };
 static const char chooserNames[][STRING_LEN] = { "Sensor 1", "Sensor 2", "Sensor 3" };
-IotWebConf iotWebConf("Zirkulationspumpe", &dnsServer, &server, "");
+IotWebConf iotWebConf("Zirkulationspumpe", &dnsServer, &server, "", CONFIG_VERSION);
 IotWebConfParameterGroup networkGroup = IotWebConfParameterGroup("network", "Network configuration");
 IotWebConfTextParameter hostnameParam = IotWebConfTextParameter("Hostname", "hostname", hostname, STRING_LEN, "Zirkulationspumpe");
 IotWebConfParameterGroup mqttGroup = IotWebConfParameterGroup("mqtt", "MQTT configuration");
@@ -634,6 +636,10 @@ void setup()
   WiFi.setAutoReconnect(true);
   WiFi.setHostname(hostname);
   
+  iotWebConf.setupUpdateServer(
+    [](const char* updatePath) { httpUpdater.setup(&server, updatePath); },
+    [](const char* userName, char* password) { httpUpdater.updateCredentials(userName, password); });
+
   networkGroup.addItem(&hostnameParam);
   iotWebConf.addParameterGroup(&networkGroup);
   mqttGroup.addItem(&mqttServerParam);
