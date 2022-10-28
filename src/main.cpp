@@ -635,6 +635,7 @@ void setup()
   WiFi.onEvent(onWifiDisconnect, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   WiFi.setAutoReconnect(true);
   WiFi.setHostname(hostname);
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);
   
   iotWebConf.setupUpdateServer(
     [](const char* updatePath) { httpUpdater.setup(&server, updatePath); },
