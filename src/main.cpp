@@ -371,23 +371,17 @@ void updateDisplay()
         display.drawString(64, 36, "Pumpe aus");
       }
       break;
-    // case 1:
-    // // Display Page 2 - last 5 pump starts
-    //   display.setFont(ArialMT_Plain_10);
-    //   display.setTextAlignment(TEXT_ALIGN_CENTER);
-    //   display.drawString(64, 0, "Letzte Starts");
-    //   display.drawLine(0, 11, 128, 11);
-    //   for (unsigned int cnt = pumpCnt; cnt++; cnt <= 4 + pumpCnt)
-    //   { // display last 5 pumpOn Events in right order
-    //     unsigned int pumpCntTemp;
-    //     if (cnt > 4)
-    //       pumpCntTemp = cnt - 5;
-    //     else
-    //       pumpCntTemp = cnt;
-    //     display.drawString(64, lineCnt * 10 + 2, pump[pumpCntTemp]);
-    //     lineCnt++;
-    //   }
-    //   break;
+    case 1:
+    // Display Page 2 - last 5 pump starts
+      display.setFont(ArialMT_Plain_10);
+      display.setTextAlignment(TEXT_ALIGN_CENTER);
+      display.drawString(64, 0, "Letzte Starts");
+      display.drawLine(0, 11, 128, 11);
+      for (unsigned int cnt = 0; cnt++; cnt <= 4)
+      { // display last 5 pumpOn Events in right order        
+        display.drawString(64, lineCnt * 10 + 2, pump[(pumpCnt + cnt) % 5]);
+      }
+      break;
     case 2:
       uptime::calculateUptime();
       display.setTextAlignment(TEXT_ALIGN_CENTER);
