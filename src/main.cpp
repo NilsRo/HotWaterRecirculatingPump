@@ -28,7 +28,8 @@ const int WIFICONFIGPIN = D7;
 
 String pump[5] = {"", "", "", "", ""};
 unsigned int pumpCnt = 0;
-static float t[] = {0.0, 0.0, 0.0, 0.0, 0.0}; // letzten 5 Temepraturwerte speichern
+bool pumpCntInit = true;
+static float t[] = {255.0, 255.0, 255.0, 255.0, 255.0}; // letzten 5 Temepraturwerte speichern
 bool pumpRunning = false;
 bool pumpManual = false;
 unsigned long pumpStartedAt = 0;
@@ -154,7 +155,7 @@ void handleRoot()
   s += ntpTimezone;
   s += "</li>";
   s += "<li>actual local time: ";
-  strftime(tempStr, 9, "%T", &localTime);
+  strftime(tempStr, 40, "%d.%m.%Y %T", &localTime);
   s += String(tempStr) + "</li>";
   s += "</ul><h3>Sensors</h3><ul>";
   s += "<li>Sensor Out: ";
@@ -179,11 +180,11 @@ void handleRoot()
     s += "stopped";
   s += "</li></ul>";
   s += "<p><h3>5 Last pump actions</h3>";
-    for (unsigned int cnt = 0; cnt++; cnt <= 4)
+    for (unsigned int cnt = 0; cnt <= 4; cnt++)
     { // display last 5 pumpOn Events in right order
-      s += String(cnt + 1) + ": " + pump[(pumpCnt + cnt) % 5] + "<br>";
+      s += String(cnt + 1) + ": " + pump[(pumpCnt - cnt) % 5] + "<br>";
     }
-  s += "Go to <a href='config'>Configuration</a>";
+  s += "<p>Go to <a href='config'>Configuration</a>";
   s += "</body></html>\n";
 
   server.send(200, "text/html", s);
@@ -462,9 +463,9 @@ void updateDisplay()
     display.setTextAlignment(TEXT_ALIGN_CENTER);
     display.drawString(64, 0, "Letzte Starts");
     display.drawLine(0, 11, 128, 11);
-    for (unsigned int cnt = 0; cnt++; cnt <= 4)
+    for (unsigned int cnt = 0; cnt <= 4; cnt++)
     { // display last 5 pumpOn Events in right order
-      display.drawString(64, lineCnt * 10 + 2, pump[(pumpCnt + cnt) % 5]);
+      display.drawString(64, lineCnt * 10 + 2, pump[(pumpCnt - cnt) % 5]);
     }
     break;
   case 2:
@@ -679,17 +680,21 @@ void updateDisplay()
 
 void pumpOn()
 {
+  char tempStr[128];
   Serial.println("Turn on circulation");
   if (mqttClient.connected()) mqttClient.publish(MQTT_PUB_PUMP, 0, true, "1");
   pumpRunning = true;
   pumpStartedAt = millis();
   digitalWrite(PUMPPIN, LOW);
   // digitalWrite(VALVEPIN, HIGH);
-
-  Serial.println(timeClient.getFormattedTime());
-  pump[pumpCnt] = timeClient.getFormattedTime();
-  if (++pumpCnt >= 5)
-    pumpCnt = 0; // Reset counter
+  Serial.print("Pump on: ");
+  strftime(tempStr, 40, "%d.%m.%Y %T", &localTime);
+  Serial.println(tempStr);
+  if (pumpCntInit)
+    pumpCntInit = false;
+  else if (++pumpCnt > 4)
+      pumpCnt = 0; // Reset counter  
+  pump[pumpCnt] = tempStr;
 }
 
 void pumpOff()
@@ -697,6 +702,7 @@ void pumpOff()
   Serial.println("Turn off circulation");
   if (mqttClient.connected()) mqttClient.publish(MQTT_PUB_PUMP, 0, true, "0");
   pumpRunning = false;
+  pump[pumpCnt] += " (" + String(floor(millis() - pumpStartedAt) / 1000 / 60) + " min.)";
   digitalWrite(PUMPPIN, HIGH);
   // digitalWrite(VALVEPIN, LOW);
 }
