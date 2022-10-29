@@ -153,6 +153,9 @@ void handleRoot()
   s += "<li>NTP Timezone: ";
   s += ntpTimezone;
   s += "</li>";
+  s += "<li>actual local time: ";
+  strftime(tempStr, 9, "%T", &localTime);
+  s += String(tempStr) + "</li>";
   s += "</ul><h3>Sensors</h3><ul>";
   s += "<li>Sensor Out: ";
   s += tempOutParam.value();
@@ -174,7 +177,12 @@ void handleRoot()
     s += "running";
   else
     s += "stopped";
-  s += "</li>";
+  s += "</li></ul>";
+  s += "<p><h3>5 Last pump actions</h3>";
+    for (unsigned int cnt = 0; cnt++; cnt <= 4)
+    { // display last 5 pumpOn Events in right order
+      s += String(cnt + 1) + ": " + pump[(pumpCnt + cnt) % 5] + "<br>";
+    }
   s += "Go to <a href='config'>Configuration</a>";
   s += "</body></html>\n";
 
