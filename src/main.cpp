@@ -417,9 +417,9 @@ void updateDisplay()
     display.drawString(64, 0, "Laufzeit");
     display.drawLine(0, 11, 128, 11);
     display.setFont(ArialMT_Plain_16);
-    display.drawString(64, 24, String(uptime::getDays()) + " Tage ");
+    display.drawString(64, 18, String(uptime::getDays()) + " Tage ");
     sprintf(uptimeStr, "%02u:%02u:%02u", uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
-    display.drawString(64, 44, String(uptimeStr));
+    display.drawString(64, 38, String(uptimeStr));
     break;
   case 3:
     display.setFont(ArialMT_Plain_10);
@@ -534,17 +534,17 @@ void updateDisplay()
     if (iotWebConf.getState() == 4)
     {
       display.setFont(ArialMT_Plain_16);
-      display.drawString(64, 12, "WiFi bereits");
-      display.drawString(64, 30, "verbunden");
+      display.drawString(64, 18, "WiFi bereits");
+      display.drawString(64, 38, "verbunden");
     }
     else
-    {      
+    {
       // WiFi.scanNetworks will return the number of networks found
       if (WiFi.getMode() != WIFI_STA)
       {
         WiFi.mode(WIFI_STA);
         WiFi.disconnect();
-      }      
+      }
       if ((60000 < now - lastScan) && WiFi.getMode() == WIFI_STA)  //blocked for 60s
       {
         Serial.println("scan started");
@@ -554,7 +554,7 @@ void updateDisplay()
         networksPageFirstCall = true;
       }
       networksFound = WiFi.scanComplete();
-      
+
       Serial.print("Scan status: ");
       Serial.println(networksFound);
       if (networksFound == -1)
@@ -578,7 +578,7 @@ void updateDisplay()
       else
       {
         Serial.print("Networks found: ");
-        Serial.println(networksFound);        
+        Serial.println(networksFound);
         if (networksPageFirstCall)
         {
           networksPageFirstCall = false;
@@ -602,7 +602,7 @@ void updateDisplay()
           Serial.print(")");
           Serial.println((WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? " " : "*");
           display.setFont(ArialMT_Plain_10);
-          display.setTextAlignment(TEXT_ALIGN_LEFT);          
+          display.setTextAlignment(TEXT_ALIGN_LEFT);
           display.drawString(0, 1 + (10 * lineCnt), String(i + 1) + ": " +String(WiFi.SSID(i)) + " (" + String(WiFi.RSSI(i)) + ")");
           lineCnt++;
         }
@@ -683,10 +683,10 @@ void check()
     Serial.print(" Temp In: ");
     Serial.println(tempRet);
     Serial.print(" Temp Int: ");
-    Serial.println(tempInt);    
+    Serial.println(tempInt);
     if (mqttClient.connected())
     {
-      dtostrf(tempOut, 2, 2, msg_out);    
+      dtostrf(tempOut, 2, 2, msg_out);
       mqttClient.publish(MQTT_PUB_TEMP_OUT, 0, true, msg_out);
       dtostrf(tempRet, 2, 2, msg_out);
       mqttClient.publish(MQTT_PUB_TEMP_RET, 0, true, msg_out);
@@ -776,7 +776,7 @@ void setup()
   iotWebConf.setConfigSavedCallback(&configSaved);
   iotWebConf.setFormValidator(&formValidator);
   iotWebConf.setWifiConnectionCallback(&onWifiConnected);
-  iotWebConf.setConfigPin(WIFICONFIGPIN);
+    iotWebConf.setConfigPin(WIFICONFIGPIN);
   iotWebConf.init();
   // -- Set up required URL handlers on the web server.
   bool validConfig = iotWebConf.init();
@@ -892,9 +892,9 @@ void loop()
   if ((500 < now - displayLastChanged) && (displayPinState != digitalRead(DISPLAYPIN)))
   {
     displayPinState = 1 - displayPinState; // invert pin state as it is changed
-    displayLastChanged = now;    
+    displayLastChanged = now;
     if (displayPinState) // button pressed action - set pressed time
-    { 
+    {
       // button released
       timeReleased = millis();
       Serial.println("Button released");
@@ -929,7 +929,7 @@ void loop()
               displayPage = 0;
             else
               displayPage++;
-            
+
             if (displayPage == 6)
             {
               if (iotWebConf.getState() != 4)
@@ -945,9 +945,9 @@ void loop()
       }
     }
     else
-    { 
+    {
       timePressed = millis();
-      Serial.println("Button pressed"); 
+      Serial.println("Button pressed");
     }
   }
   if (displayLastChanged > 600000)
