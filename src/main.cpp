@@ -31,6 +31,7 @@ unsigned int pumpCnt = 0;
 static float t[] = {0.0, 0.0, 0.0, 0.0, 0.0}; // letzten 5 Temepraturwerte speichern
 bool pumpRunning = false;
 bool pumpManual = false;
+unsigned long pumpStartedAt = 0;
 unsigned long timePressed = 0;
 unsigned long timeReleased = 0;
 float tempOut;
@@ -152,7 +153,7 @@ void handleRoot()
   s += "<li>NTP Timezone: ";
   s += ntpTimezone;
   s += "</li>";
-  s += "</ul><3>Sensors</h3><ul>";
+  s += "</ul><h3>Sensors</h3><ul>";
   s += "<li>Sensor Out: ";
   s += tempOutParam.value();
   dtostrf(tempOut, 2, 2, tempStr);
@@ -278,6 +279,30 @@ void checkSensors()
   }
 }
 
+void getTemp()
+{
+  char msg_out[20];
+  sensors.requestTemperatures(); // Send the command to get temperatures
+  tempOut = sensors.getTempC(sensorOut_id);
+  tempRet = sensors.getTempC(sensorRet_id);
+  tempInt = sensors.getTempC(sensorInt_id);
+  Serial.print(" Temp Out: ");
+  Serial.println(tempOut);
+  Serial.print(" Temp In: ");
+  Serial.println(tempRet);
+  Serial.print(" Temp Int: ");
+  Serial.println(tempInt);
+  if (mqttClient.connected())
+  {
+    dtostrf(tempOut, 2, 2, msg_out);
+    mqttClient.publish(MQTT_PUB_TEMP_OUT, 0, true, msg_out);
+    dtostrf(tempRet, 2, 2, msg_out);
+    mqttClient.publish(MQTT_PUB_TEMP_RET, 0, true, msg_out);
+    dtostrf(tempInt, 2, 2, msg_out);
+    mqttClient.publish(MQTT_PUB_TEMP_INT, 0, true, msg_out);
+  }
+}
+
 void printAddress(DeviceAddress deviceAddress)
 {
   for (uint8_t i = 0; i < 8; i++)
@@ -312,6 +337,15 @@ void getLocalTime()
     return;
   }
   localTime = timeinfo;
+}
+
+void updateTime()
+{
+  if (iotWebConf.getState() == 4)
+  {
+    timeClient.update();
+    getLocalTime();
+  }
 }
 
 void publishUptime()
@@ -637,10 +671,10 @@ void pumpOn()
   Serial.println("Turn on circulation");
   if (mqttClient.connected()) mqttClient.publish(MQTT_PUB_PUMP, 0, true, "1");
   pumpRunning = true;
+  pumpStartedAt = millis();
   digitalWrite(PUMPPIN, LOW);
   // digitalWrite(VALVEPIN, HIGH);
 
-  timeClient.update();
   Serial.println(timeClient.getFormattedTime());
   pump[pumpCnt] = timeClient.getFormattedTime();
   if (++pumpCnt >= 5)
@@ -663,12 +697,7 @@ void disinfection()
 
 void check()
 {
-  char msg_out[20];
-  if (iotWebConf.getState() == 4)
-  {
-    timeClient.update();
-    getLocalTime();
-  }
+  updateTime();
 
   if (sensorError)
   {
@@ -686,26 +715,7 @@ void check()
   }
   else
   {
-    sensors.requestTemperatures(); // Send the command to get temperatures
-    tempOut = sensors.getTempC(sensorOut_id);
-    tempRet = sensors.getTempC(sensorRet_id);
-    tempInt = sensors.getTempC(sensorInt_id);
-    Serial.print(" Temp Out: ");
-    Serial.println(tempOut);
-    Serial.print(" Temp In: ");
-    Serial.println(tempRet);
-    Serial.print(" Temp Int: ");
-    Serial.println(tempInt);
-    if (mqttClient.connected())
-    {
-      dtostrf(tempOut, 2, 2, msg_out);
-      mqttClient.publish(MQTT_PUB_TEMP_OUT, 0, true, msg_out);
-      dtostrf(tempRet, 2, 2, msg_out);
-      mqttClient.publish(MQTT_PUB_TEMP_RET, 0, true, msg_out);
-      dtostrf(tempInt, 2, 2, msg_out);
-      mqttClient.publish(MQTT_PUB_TEMP_INT, 0, true, msg_out);
-    }
-
+    getTemp();
     if (!pumpManual)
     {
       float temperatur_delta = 0.0;
@@ -714,8 +724,8 @@ void check()
         checkCnt = 0; // Reset counter
       t[checkCnt] = tempOut;
       int cnt_alt = (checkCnt + 6) % 5;
-      if (!pumpRunning && tempRet < tempOut - 10.0)
-      {                                              // start only if retern flow temp is 10 degree below temp out (hystersis)
+      if (!pumpRunning)
+      {
         temperatur_delta = t[checkCnt] - t[cnt_alt]; // Difference to 5 sec before
         if (temperatur_delta >= 0.12)
         { // smallest temp change is 0,12°C,
@@ -725,12 +735,9 @@ void check()
           disinfection24hTimer.attach(86400, disinfection);
         }
       }
-      else
-      {
-        if (pumpRunning && tempRetBlock)
-        { // if return flow temp near temp out stop pump with a delay
-          pumpOff();
-        }
+      else if (pumpRunning && tempRetBlock && 120000 < (millis() - pumpStartedAt))
+      { // if return flow temp near temp out stop pump with a delay of 2 minutes
+        pumpOff();
       }
     }
   }
