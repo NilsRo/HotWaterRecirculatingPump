@@ -121,7 +121,7 @@ iotwebconf::SelectTParameter<STRING_LEN> tempRetParam =
     iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempRetParam").label("Sensor Return").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("2").build();
 iotwebconf::SelectTParameter<STRING_LEN> tempIntParam =
     iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempIntParam").label("Sensor Internal").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("3").build();
-iotwebconf::FloatTParameter tempRetDiffParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("tempRetDiffParam").label("Return Off Diff").defaultValue(20.0).step(0.5).placeholder("e.g. 23.4").build();
+iotwebconf::FloatTParameter tempRetDiffParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("tempRetDiffParam").label("Return Off Diff").defaultValue(10.0).step(0.5).placeholder("e.g. 23.4").build();
 
 // -- SECTION: Wifi Manager
 void handleRoot()
@@ -132,32 +132,44 @@ void handleRoot()
     // -- Captive portal request were already served.
     return;
   }
+  char tempStr[128];
+
   String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
+  s += "<link rel=\"stylesheet\" href=\"https://unpkg.com/mvp.css@1.12/mvp.css\">";
   s += "<title>Warmwater Recirculation Pump</title></head><body>";
-  s += "Network<ul>";
+  s += "<h3>Network</h3><ul>";
   s += "<li>Hostname : ";
   s += hostname;
   s += "</li>";
-  s += "</ul>MQTT<ul>";
+  s += "</ul><h3>MQTT</h3><ul>";
   s += "<li>MQTT Server: ";
   s += mqttServer;
   s += "</li>";
-  s += "</ul>NTP<ul>";
+  s += "</ul><h3>NTP</h3><ul>";
   s += "<li>NTP Server: ";
   s += ntpServer;
   s += "</li>";
   s += "<li>NTP Timezone: ";
   s += ntpTimezone;
   s += "</li>";
-  s += "</ul>Sensors<ul>";
+  s += "</ul><3>Sensors</h3><ul>";
   s += "<li>Sensor Out: ";
   s += tempOutParam.value();
+  dtostrf(tempOut, 2, 2, tempStr);
+  s += " / " + String(tempStr) + "&#8451;";
   s += "<li>Sensor Return: ";
   s += tempRetParam.value();
+  dtostrf(tempRet, 2, 2, tempStr);
+  s += " / " + String(tempStr) + "&#8451;";
   s += "<li>Sensor Internal: ";
   s += tempIntParam.value();
+  dtostrf(tempInt, 2, 2, tempStr);
+  s += " / " + String(tempStr) + "&#8451;";
   s += "<li>Return Temperature Difference (Off Trigger): ";
   s += tempRetDiffParam.value();
+  s += "</li>";
+  s += "<li>Pump: ";
+  s += String(pumpRunning);
   s += "</li>";
   s += "Go to <a href='config'>Configuration</a>";
   s += "</body></html>\n";
@@ -431,7 +443,7 @@ void updateDisplay()
     {
       temp = sensors.getTempC(sensor1_id);
       dtostrf(temp, 2, 2, tempStr);
-      display.drawString(64, 12, "1: " + String(tempStr) + "C°");
+      display.drawString(64, 12, "1: " + String(tempStr) + "°C");
     }
     else
       display.drawString(64, 12, "1: kein Sensor");
@@ -439,7 +451,7 @@ void updateDisplay()
     {
       temp = sensors.getTempC(sensor2_id);
       dtostrf(temp, 2, 2, tempStr);
-      display.drawString(64, 30, "2: " + String(tempStr) + "C°");
+      display.drawString(64, 30, "2: " + String(tempStr) + "°C");
     }
     else
       display.drawString(64, 30, "2: kein Sensor");
@@ -447,7 +459,7 @@ void updateDisplay()
     {
       temp = sensors.getTempC(sensor3_id);
       dtostrf(temp, 2, 2, tempStr);
-      display.drawString(64, 48, "3: " + String(tempStr) + "C°");
+      display.drawString(64, 48, "3: " + String(tempStr) + "°C");
     }
     else
       display.drawString(64, 48, "3: kein Sensor");
