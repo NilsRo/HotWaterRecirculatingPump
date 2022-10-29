@@ -15,6 +15,7 @@
 #include <WiFiUdp.h>
 #include <time.h>
 #include <uptime.h>
+#include <algorithm>
 
 #define STRING_LEN 128
 
@@ -31,6 +32,7 @@ static float t[] = {0.0, 0.0, 0.0, 0.0, 0.0}; // letzten 5 Temepraturwerte speic
 bool pumpRunning = false;
 bool pumpManual = false;
 unsigned long timePressed = 0;
+unsigned long timeReleased = 0;
 float tempOut;
 float tempRet;
 float tempInt;
@@ -83,6 +85,11 @@ time_t now;
 struct tm localTime;
 
 IPAddress localIP;
+unsigned long lastScan = 0;
+int networksFound;
+int networksPage = 0;
+unsigned int networksPageTotal = 0;
+unsigned long networksPageChange = 0;
 
 #define CONFIG_VERSION "1"
 int iotWebConfPinState = HIGH;
@@ -305,6 +312,7 @@ void updateDisplay()
   DeviceAddress sensor1_id;
   DeviceAddress sensor2_id;
   DeviceAddress sensor3_id;
+  unsigned long now = millis();
 
   display.clear();
 
@@ -500,20 +508,20 @@ void updateDisplay()
     }
     display.drawString(64, 22, "SSID: " + WiFi.SSID());
     display.drawString(64, 32, "RSSI: " + String(WiFi.RSSI()));
-    display.drawString(64, 42, "Sendeistung: " + String(WiFi.getTxPower()));
+    display.drawString(64, 42, "Sendeleistung: " + String(WiFi.getTxPower()));
     if (WiFi.isConnected())
     {
       display.drawString(64, 52, WiFi.localIP().toString());
     }
     else
     {
-      display.drawString(64, 42, "keine IP");
+      display.drawString(64, 52, "keine IP");
     }
     break;
   case 6:
     display.setFont(ArialMT_Plain_10);
     display.setTextAlignment(TEXT_ALIGN_CENTER);
-    display.drawString(64, 0, "WiFi Netzwerke TOP 5");
+    display.drawString(64, 0, "WiFi Netzwerke");
     display.drawLine(0, 11, 128, 11);
     if (iotWebConf.getState() == 4)
     {
@@ -522,24 +530,48 @@ void updateDisplay()
       display.drawString(64, 30, "verbunden");
     }
     else
-    {
-      display.setFont(ArialMT_Plain_24);
-      display.drawString(64, 14, "Suche...");
-      iotWebConf.goOffLine();
+    {      
       // WiFi.scanNetworks will return the number of networks found
-      int n = WiFi.scanNetworks();
-      Serial.println("scan done");
-      if (n == 0)
+      if (WiFi.getMode() != WIFI_STA)
       {
-        Serial.println("no networks found");
+        WiFi.mode(WIFI_STA);
+        WiFi.disconnect();
+      }      
+      if ((60000 < now - lastScan) && WiFi.getMode() == WIFI_STA)  //blocked for 60s
+      {
+        Serial.println("scan started");
+        WiFi.scanDelete();
+        WiFi.scanNetworks(true);
+      }
+      networksFound = WiFi.scanComplete();
+      
+      Serial.print("Scan status: ");
+      Serial.println(networksFound);
+      if (networksFound == -1)
+      {
+        display.setFont(ArialMT_Plain_24);
+        display.drawString(64, 24, "Suche...");
+        lastScan = now;
+      }
+      else if (networksFound == -2)
+      {
+        display.setFont(ArialMT_Plain_24);
+        display.drawString(64, 24, "Warte...");
+      }
+      else if (networksFound == 0)
+      {
+        Serial.print("Networks found: ");
+        Serial.println(networksFound);
         display.setFont(ArialMT_Plain_16);
-        display.drawString(64, 14, "Keine APs");
+        display.drawString(64, 24, "Keine APs");
       }
       else
       {
-        Serial.print(n);
-        Serial.println(" networks found");
-        for (int i = 0; i < n; ++i)
+        Serial.print("Networks found: ");
+        Serial.println(networksFound);
+        networksPageTotal = ceil(networksFound / 5);
+        networksPage = 0;
+        for (int i = networksPage * 5; i < min(networksPage * 5 + 5,networksFound); i++)
         {
           // Print SSID and RSSI for each network found
           Serial.print(i + 1);
@@ -549,14 +581,16 @@ void updateDisplay()
           Serial.print(WiFi.RSSI(i));
           Serial.print(")");
           Serial.println((WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? " " : "*");
-          if (i < 5)
+          display.setFont(ArialMT_Plain_10);
+          display.drawString(64, 11 * lineCnt, String(WiFi.SSID(i)) + " (" + String(WiFi.RSSI(i)) + ")");
+          lineCnt++;
+          if (5000 < now - networksPageChange) 
           {
-            display.setFont(ArialMT_Plain_10);
-            display.drawString(64, 12, String(WiFi.SSID(i)) + " (" + String(WiFi.RSSI(i) + ")"));
+            networksPage = (networksPage + 1) % (networksPageTotal - 1);
+            networksPageChange = now;
           }
         }
       }
-      iotWebConf.goOnLine();
     }
   }
   display.display();
@@ -824,13 +858,19 @@ void loop()
   if ((500 < now - displayLastChanged) && (displayPinState != digitalRead(DISPLAYPIN)))
   {
     displayPinState = 1 - displayPinState; // invert pin state as it is changed
-    displayLastChanged = now;
+    displayLastChanged = now;    
     if (displayPinState) // button pressed action - set pressed time
-      timePressed = millis();
-    else
-    { // button released
-      if (timePressed > 2000)
+    { 
+      // button released
+      timeReleased = millis();
+      Serial.println("Button released");
+      Serial.print("Display Button State: ");
+      Serial.print(displayPinState);
+      Serial.print(", Time: ");
+      Serial.println(timeReleased - timePressed);
+      if (2000 < (timeReleased - timePressed))
       {
+        Serial.println("Long press detected");
         pumpManual = !pumpManual;
       }
       else
@@ -838,9 +878,9 @@ void loop()
         if (pumpManual)
         {
           if (pumpRunning)
-            pumpOn();
-          else
             pumpOff();
+          else
+            pumpOn();
         }
         else
         {
@@ -855,9 +895,25 @@ void loop()
               displayPage = 0;
             else
               displayPage++;
+            
+            if (displayPage == 6)
+            {
+              if (iotWebConf.getState() != 4)
+                iotWebConf.goOffLine();
+            }
+            else
+            {
+              if (iotWebConf.getState() == 5)
+                iotWebConf.goOnLine();
+            }
           }
         }
       }
+    }
+    else
+    { 
+      timePressed = millis();
+      Serial.println("Button pressed"); 
     }
   }
   if (displayLastChanged > 600000)
