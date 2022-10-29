@@ -74,7 +74,9 @@ AsyncMqttClient mqttClient;
 Ticker mqttReconnectTimer;
 Ticker disinfection24hTimer;
 Ticker secTimer;
+Ticker displayTimer;
 Ticker publishUptimeTimer;
+
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP);
@@ -88,6 +90,8 @@ IPAddress localIP;
 unsigned long lastScan = 0;
 int networksFound;
 int networksPage = 0;
+int networksLineStart = 0;
+int networksLineEnd = 0;
 unsigned int networksPageTotal = 0;
 unsigned long networksPageChange = 0;
 
@@ -237,7 +241,7 @@ void checkSensors()
 {
   if (sensorDetectionError)
   {
-    mqttClient.publish(MQTT_PUB_INFO, 0, true, "Sensorfehler");
+    if (mqttClient.connected()) mqttClient.publish(MQTT_PUB_INFO, 0, true, "Sensorfehler");
     sensorError = true;
   }
   else
@@ -252,7 +256,7 @@ void checkSensors()
     }
     else
     {
-      mqttClient.publish(MQTT_PUB_INFO, 0, true, "Sensorfehler");
+      if (mqttClient.connected()) mqttClient.publish(MQTT_PUB_INFO, 0, true, "Sensorfehler");
       sensorError = true;
     }
   }
@@ -300,7 +304,7 @@ void publishUptime()
   uptime::calculateUptime();
   sprintf(msg_out, "%03u Tage %02u:%02u:%02u", uptime::getDays(), uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
   Serial.println(msg_out);
-  mqttClient.publish(MQTT_PUB_INFO, 0, true, msg_out);
+  if (mqttClient.connected()) mqttClient.publish(MQTT_PUB_INFO, 0, true, msg_out);
 }
 
 void updateDisplay()
@@ -542,6 +546,8 @@ void updateDisplay()
         Serial.println("scan started");
         WiFi.scanDelete();
         WiFi.scanNetworks(true);
+        networksPage = 1;
+        networksPageChange = now;
       }
       networksFound = WiFi.scanComplete();
       
@@ -568,10 +574,22 @@ void updateDisplay()
       else
       {
         Serial.print("Networks found: ");
-        Serial.println(networksFound);
-        networksPageTotal = ceil(networksFound / 5);
-        networksPage = 0;
-        for (int i = networksPage * 5; i < min(networksPage * 5 + 5,networksFound); i++)
+        Serial.println(networksFound);        
+        networksPageTotal = ceil(networksFound / 5.0);
+        networksLineStart = ((networksPage) - 1) * 5;
+        networksLineEnd = min(networksPage * 5, networksFound);
+        Serial.print("Networks Page ");
+        Serial.print(networksPage);
+        Serial.print("/");
+        Serial.println(networksPageTotal);
+        Serial.print("Startline: ");
+        Serial.print(networksLineStart);
+        Serial.print("/");
+        Serial.println(networksLineEnd);                
+        display.setTextAlignment(TEXT_ALIGN_RIGHT);
+        display.drawString(127, 0, "(" + String(networksPage) + "/" + String(networksPageTotal) + ")");
+
+        for (int i = networksLineStart; i < networksLineEnd; i++)
         {
           // Print SSID and RSSI for each network found
           Serial.print(i + 1);
@@ -582,13 +600,17 @@ void updateDisplay()
           Serial.print(")");
           Serial.println((WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? " " : "*");
           display.setFont(ArialMT_Plain_10);
-          display.drawString(64, 11 * lineCnt, String(WiFi.SSID(i)) + " (" + String(WiFi.RSSI(i)) + ")");
+          display.setTextAlignment(TEXT_ALIGN_LEFT);          
+          display.drawString(0, 1 + (10 * lineCnt), String(i + 1) + ": " +String(WiFi.SSID(i)) + " (" + String(WiFi.RSSI(i)) + ")");
           lineCnt++;
-          if (5000 < now - networksPageChange) 
-          {
-            networksPage = (networksPage + 1) % (networksPageTotal - 1);
-            networksPageChange = now;
-          }
+        }
+        if ((10000 < now - networksPageChange) && networksPageTotal > 1)
+        {
+          if (networksPage < networksPageTotal)
+            networksPage++;
+          else
+            networksPage = 1;
+          networksPageChange = now;
         }
       }
     }
@@ -599,7 +621,7 @@ void updateDisplay()
 void pumpOn()
 {
   Serial.println("Turn on circulation");
-  mqttClient.publish(MQTT_PUB_PUMP, 0, true, "1");
+  if (mqttClient.connected()) mqttClient.publish(MQTT_PUB_PUMP, 0, true, "1");
   pumpRunning = true;
   digitalWrite(PUMPPIN, LOW);
   // digitalWrite(VALVEPIN, HIGH);
@@ -614,7 +636,7 @@ void pumpOn()
 void pumpOff()
 {
   Serial.println("Turn off circulation");
-  mqttClient.publish(MQTT_PUB_PUMP, 0, true, "0");
+  if (mqttClient.connected()) mqttClient.publish(MQTT_PUB_PUMP, 0, true, "0");
   pumpRunning = false;
   digitalWrite(PUMPPIN, HIGH);
   // digitalWrite(VALVEPIN, LOW);
@@ -628,8 +650,11 @@ void disinfection()
 void check()
 {
   char msg_out[20];
-  timeClient.update();
-  getLocalTime();
+  if (iotWebConf.getState() == 4)
+  {
+    timeClient.update();
+    getLocalTime();
+  }
 
   if (sensorError)
   {
@@ -656,13 +681,16 @@ void check()
     Serial.print(" Temp In: ");
     Serial.println(tempRet);
     Serial.print(" Temp Int: ");
-    Serial.println(tempInt);
-    dtostrf(tempOut, 2, 2, msg_out);
-    mqttClient.publish(MQTT_PUB_TEMP_OUT, 0, true, msg_out);
-    dtostrf(tempRet, 2, 2, msg_out);
-    mqttClient.publish(MQTT_PUB_TEMP_RET, 0, true, msg_out);
-    dtostrf(tempInt, 2, 2, msg_out);
-    mqttClient.publish(MQTT_PUB_TEMP_INT, 0, true, msg_out);
+    Serial.println(tempInt);    
+    if (mqttClient.connected())
+    {
+      dtostrf(tempOut, 2, 2, msg_out);    
+      mqttClient.publish(MQTT_PUB_TEMP_OUT, 0, true, msg_out);
+      dtostrf(tempRet, 2, 2, msg_out);
+      mqttClient.publish(MQTT_PUB_TEMP_RET, 0, true, msg_out);
+      dtostrf(tempInt, 2, 2, msg_out);
+      mqttClient.publish(MQTT_PUB_TEMP_INT, 0, true, msg_out);
+    }
 
     if (!pumpManual)
     {
@@ -694,7 +722,6 @@ void check()
 void onSecTimer()
 {
   check();
-  updateDisplay();
 }
 
 void setup()
@@ -828,6 +855,7 @@ void setup()
   disinfection24hTimer.attach(86400, disinfection);
   secTimer.attach(1, onSecTimer);
   publishUptimeTimer.attach(10, publishUptime);
+  displayTimer.attach_ms(500, updateDisplay);
 }
 
 void loop()
