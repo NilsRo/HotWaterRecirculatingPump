@@ -168,9 +168,12 @@ void handleRoot()
   s += " / " + String(tempStr) + "&#8451;";
   s += "<li>Return Temperature Difference (Off Trigger): ";
   s += tempRetDiffParam.value();
-  s += "</li>";
+  s += "&#8451;</li>";
   s += "<li>Pump: ";
-  s += String(pumpRunning);
+  if (pumpRunning)
+    s += "running";
+  else
+    s += "stopped";
   s += "</li>";
   s += "Go to <a href='config'>Configuration</a>";
   s += "</body></html>\n";
@@ -697,7 +700,6 @@ void disinfection()
 
 void check()
 {
-  updateTime();
 
   if (sensorError)
   {
@@ -735,7 +737,7 @@ void check()
           disinfection24hTimer.attach(86400, disinfection);
         }
       }
-      else if (pumpRunning && tempRetBlock && 120000 < (millis() - pumpStartedAt))
+      else if (tempRetBlock && 120000 < (millis() - pumpStartedAt))
       { // if return flow temp near temp out stop pump with a delay of 2 minutes
         pumpOff();
       }
@@ -745,6 +747,7 @@ void check()
 
 void onSecTimer()
 {
+  updateTime();
   check();
 }
 
