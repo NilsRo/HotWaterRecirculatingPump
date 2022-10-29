@@ -52,6 +52,7 @@ bool sensorError = false;
 // OLED Display
 SSD1306Wire display(0x3C, SDA, SCL); // ADDRESS, SDA, SCL  -  SDA and SCL usually populate automatically based on your board's pins_arduino.h e.g. https://github.com/esp8266/Arduino/blob/master/variants/nodemcu/pins_arduino.h
 unsigned int displayPage = 0;
+bool networksPageFirstCall = true;
 int displayPinState = HIGH;
 unsigned long displayLastChanged = 0;
 bool displayOn = true;
@@ -113,13 +114,14 @@ IotWebConfPasswordParameter mqttUserPasswordParam = IotWebConfPasswordParameter(
 IotWebConfParameterGroup ntpGroup = IotWebConfParameterGroup("ntp", "NTP configuration");
 IotWebConfTextParameter ntpServerParam = IotWebConfTextParameter("NTP Server", "ntpServer", ntpServer, STRING_LEN, "at.pool.ntp.org");
 IotWebConfTextParameter ntpTimezoneParam = IotWebConfTextParameter("NTP timezone", "ntpTimezone", ntpTimezone, STRING_LEN, "CET-1CEST,M3.5.0/02,M10.5.0/03");
-IotWebConfParameterGroup tempGroup = IotWebConfParameterGroup("temp", "DS18B20 configuration");
+IotWebConfParameterGroup tempGroup = IotWebConfParameterGroup("temp", "Temperature configuration");
 iotwebconf::SelectTParameter<STRING_LEN> tempOutParam =
     iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempOutParam").label("Sensor Out").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("1").build();
 iotwebconf::SelectTParameter<STRING_LEN> tempRetParam =
     iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempRetParam").label("Sensor Return").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("2").build();
 iotwebconf::SelectTParameter<STRING_LEN> tempIntParam =
     iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempIntParam").label("Sensor Internal").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("3").build();
+iotwebconf::FloatTParameter tempRetDiffParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("tempRetDiffParam").label("Return Off Diff").defaultValue(20.0).step(0.5).placeholder("e.g. 23.4").build();
 
 // -- SECTION: Wifi Manager
 void handleRoot()
@@ -154,6 +156,8 @@ void handleRoot()
   s += tempRetParam.value();
   s += "<li>Sensor Internal: ";
   s += tempIntParam.value();
+  s += "<li>Return Temperature Difference (Off Trigger): ";
+  s += tempRetDiffParam.value();
   s += "</li>";
   s += "Go to <a href='config'>Configuration</a>";
   s += "</body></html>\n";
@@ -547,7 +551,7 @@ void updateDisplay()
         WiFi.scanDelete();
         WiFi.scanNetworks(true);
         networksPage = 1;
-        networksPageChange = now;
+        networksPageFirstCall = true;
       }
       networksFound = WiFi.scanComplete();
       
@@ -575,17 +579,15 @@ void updateDisplay()
       {
         Serial.print("Networks found: ");
         Serial.println(networksFound);        
-        networksPageTotal = ceil(networksFound / 5.0);
+        if (networksPageFirstCall)
+        {
+          networksPageFirstCall = false;
+          networksPageChange = now;
+          networksPageTotal = ceil(networksFound / 5.0);
+          lastScan = now;
+        }
         networksLineStart = ((networksPage) - 1) * 5;
         networksLineEnd = min(networksPage * 5, networksFound);
-        Serial.print("Networks Page ");
-        Serial.print(networksPage);
-        Serial.print("/");
-        Serial.println(networksPageTotal);
-        Serial.print("Startline: ");
-        Serial.print(networksLineStart);
-        Serial.print("/");
-        Serial.println(networksLineEnd);                
         display.setTextAlignment(TEXT_ALIGN_RIGHT);
         display.drawString(127, 0, "(" + String(networksPage) + "/" + String(networksPageTotal) + ")");
 
@@ -695,6 +697,7 @@ void check()
     if (!pumpManual)
     {
       float temperatur_delta = 0.0;
+      bool tempRetBlock = tempRet > (tempOut - tempRetDiffParam.value());
       if (++checkCnt >= 5)
         checkCnt = 0; // Reset counter
       t[checkCnt] = tempOut;
@@ -704,13 +707,15 @@ void check()
         temperatur_delta = t[checkCnt] - t[cnt_alt]; // Difference to 5 sec before
         if (temperatur_delta >= 0.12)
         { // smallest temp change is 0,12°C,
+          Serial.print("Temperature Delta: ");
+          Serial.println(temperatur_delta);
           pumpOn();
           disinfection24hTimer.attach(86400, disinfection);
         }
       }
       else
       {
-        if (pumpRunning && tempRet > tempOut - 5.0)
+        if (pumpRunning && tempRetBlock)
         { // if return flow temp near temp out stop pump with a delay
           pumpOff();
         }
@@ -765,6 +770,7 @@ void setup()
   tempGroup.addItem(&tempOutParam);
   tempGroup.addItem(&tempRetParam);
   tempGroup.addItem(&tempIntParam);
+  tempGroup.addItem(&tempRetDiffParam);
   iotWebConf.addParameterGroup(&tempGroup);
 
   iotWebConf.setConfigSavedCallback(&configSaved);
