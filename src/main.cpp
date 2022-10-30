@@ -18,6 +18,8 @@
 #include <algorithm>
 
 #define STRING_LEN 128
+#define nils_length(x) ((sizeof(x)/sizeof(0[x])) / ((size_t)(!(sizeof(x) % sizeof(0[x])))))
+// #define nils_length( x ) ( sizeof(x) )
 
 // ports
 const int ONEWIREPIN = D8;
@@ -26,12 +28,13 @@ const int VALVEPIN = D4;
 const int DISPLAYPIN = D5;
 const int WIFICONFIGPIN = D7;
 
-String pump[5] = {"", "", "", "", ""};
+String pump[20] = {"", "", "", "", "","", "", "", "", "","", "", "", "", "","", "", "", "", ""};
 unsigned int pumpCnt = 0;
 bool pumpCntInit = true;
 static float t[] = {255.0, 255.0, 255.0, 255.0, 255.0}; // letzten 5 Temepraturwerte speichern
 bool pumpRunning = false;
 bool pumpManual = false;
+unsigned long pumpBlock = 0;
 unsigned long pumpStartedAt = 0;
 unsigned long timePressed = 0;
 unsigned long timeReleased = 0;
@@ -54,9 +57,11 @@ bool sensorError = false;
 // OLED Display
 SSD1306Wire display(0x3C, SDA, SCL); // ADDRESS, SDA, SCL  -  SDA and SCL usually populate automatically based on your board's pins_arduino.h e.g. https://github.com/esp8266/Arduino/blob/master/variants/nodemcu/pins_arduino.h
 unsigned int displayPage = 0;
+unsigned int displayPageLastRuns = 1;
 bool networksPageFirstCall = true;
+bool pumpFirstCall = true;
 int displayPinState = HIGH;
-unsigned long displayLastChanged = 0;
+unsigned long pumpLastRunsChange = 0;
 bool displayOn = true;
 
 char mqttServer[STRING_LEN];
@@ -93,8 +98,6 @@ IPAddress localIP;
 unsigned long lastScan = 0;
 int networksFound;
 int networksPage = 0;
-int networksLineStart = 0;
-int networksLineEnd = 0;
 unsigned int networksPageTotal = 0;
 unsigned long networksPageChange = 0;
 
@@ -179,11 +182,14 @@ void handleRoot()
   else
     s += "stopped";
   s += "</li></ul>";
-  s += "<p><h3>5 Last pump actions</h3>";
-    for (unsigned int cnt = 0; cnt <= 4; cnt++)
+  s += "<p><h3>" + String(nils_length(pump)) +  " Last pump actions</h3>";
+    for (unsigned int i = 0; i < nils_length(pump); i++)
     { // display last 5 pumpOn Events in right order
-      s += String(cnt + 1) + ": " + pump[(pumpCnt - cnt) % 5] + "<br>";
+      s += String(i + 1) + ": " + pump[(pumpCnt - i) % nils_length(pump)] + "<br>";
     }
+  uptime::calculateUptime();
+  sprintf(tempStr, "%03u Tage %02u:%02u:%02u", uptime::getDays(), uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
+  s += "<p>Uptime: " + String(tempStr);
   s += "<p>Go to <a href='config'>Configuration</a>";
   s += "</body></html>\n";
 
@@ -372,13 +378,15 @@ void publishUptime()
 void updateDisplay()
 {
   char tempStr[128];
-  unsigned int lineCnt = 1;
   char uptimeStr[8];
   float temp;
   DeviceAddress sensor1_id;
   DeviceAddress sensor2_id;
   DeviceAddress sensor3_id;
   unsigned long now = millis();
+  unsigned int lineStart = 0;
+  unsigned lineEnd = 0;
+  unsigned int lineCnt = 1;
 
   display.clear();
 
@@ -463,10 +471,25 @@ void updateDisplay()
     display.setTextAlignment(TEXT_ALIGN_CENTER);
     display.drawString(64, 0, "Letzte Starts");
     display.drawLine(0, 11, 128, 11);
-    for (unsigned int cnt = 0; cnt <= 4; cnt++)
+    lineStart = ((displayPageLastRuns) - 1) * 5;
+    lineEnd = lineStart + 4;
+    lineCnt = 1;
+    display.setTextAlignment(TEXT_ALIGN_RIGHT);
+    display.drawString(127, 0, "(" + String(displayPageLastRuns) + "/" + String(nils_length(pump) / 5) + ")");
+    display.setTextAlignment(TEXT_ALIGN_LEFT);
+    for (int i = lineStart; i <= lineEnd; i++)
     { // display last 5 pumpOn Events in right order
-      display.drawString(64, lineCnt * 10 + 2, pump[(pumpCnt - cnt) % 5]);
+      display.drawString(0, lineCnt * 10 + 2, String(i + 1) + ": " + pump[(pumpCnt - i) % nils_length(pump)]);
+      lineCnt++;
     }
+    if ((10000 < now - pumpLastRunsChange))
+      {
+        if (displayPageLastRuns < nils_length(pump) / 5)
+          displayPageLastRuns++;
+        else
+          displayPageLastRuns = 1;
+        pumpLastRunsChange = now;
+      }
     break;
   case 2:
     uptime::calculateUptime();
@@ -641,15 +664,15 @@ void updateDisplay()
         {
           networksPageFirstCall = false;
           networksPageChange = now;
-          networksPageTotal = ceil(networksFound / 5.0);
+          networksPageTotal = (int)ceil(networksFound / 5.0);
           lastScan = now;
         }
-        networksLineStart = ((networksPage) - 1) * 5;
-        networksLineEnd = min(networksPage * 5, networksFound);
+        lineStart = ((networksPage) - 1) * 5;
+        lineEnd = min((lineStart + 4), (unsigned int)networksFound);
         display.setTextAlignment(TEXT_ALIGN_RIGHT);
         display.drawString(127, 0, "(" + String(networksPage) + "/" + String(networksPageTotal) + ")");
 
-        for (int i = networksLineStart; i < networksLineEnd; i++)
+        for (int i = lineStart; i < lineEnd; i++)
         {
           // Print SSID and RSSI for each network found
           Serial.print(i + 1);
@@ -692,7 +715,7 @@ void pumpOn()
   Serial.println(tempStr);
   if (pumpCntInit)
     pumpCntInit = false;
-  else if (++pumpCnt > 4)
+  else if (++pumpCnt > nils_length(pump) - 1)
       pumpCnt = 0; // Reset counter  
   pump[pumpCnt] = tempStr;
 }
@@ -702,7 +725,7 @@ void pumpOff()
   Serial.println("Turn off circulation");
   if (mqttClient.connected()) mqttClient.publish(MQTT_PUB_PUMP, 0, true, "0");
   pumpRunning = false;
-  pump[pumpCnt] += " (" + String(floor(millis() - pumpStartedAt) / 1000 / 60) + " min.)";
+  pump[pumpCnt] += " (" + String((int)round((millis() - pumpStartedAt) / 1000 / 60)) + " min.)";
   digitalWrite(PUMPPIN, HIGH);
   // digitalWrite(VALVEPIN, LOW);
 }
@@ -743,10 +766,12 @@ void check()
       if (!pumpRunning)
       {
         temperatur_delta = t[checkCnt] - t[cnt_alt]; // Difference to 5 sec before
-        if (temperatur_delta >= 0.12)
+        if (temperatur_delta >= 0.12 && (300000 < millis() - pumpBlock || pumpFirstCall))
         { // smallest temp change is 0,12°C,
           Serial.print("Temperature Delta: ");
           Serial.println(temperatur_delta);
+          pumpBlock = millis();
+          pumpFirstCall = false;
           pumpOn();
           disinfection24hTimer.attach(86400, disinfection);
         }
@@ -925,10 +950,10 @@ void loop()
       needReset = true;
     }
   }
-  if ((500 < now - displayLastChanged) && (displayPinState != digitalRead(DISPLAYPIN)))
+  if ((500 < now - pumpLastRunsChange) && (displayPinState != digitalRead(DISPLAYPIN)))
   {
     displayPinState = 1 - displayPinState; // invert pin state as it is changed
-    displayLastChanged = now;
+    pumpLastRunsChange = now;
     if (displayPinState) // button pressed action - set pressed time
     {
       // button released
@@ -957,6 +982,7 @@ void loop()
           if (!displayOn)
           { // display was off, do not switch page
             display.displayOn();
+            displayTimer.attach_ms(500, updateDisplay);
             displayOn = true;
           }
           else
@@ -986,9 +1012,10 @@ void loop()
       Serial.println("Button pressed");
     }
   }
-  if (displayLastChanged > 600000)
+  if (pumpLastRunsChange > 600000)
   { // switch display off after 10mins
     display.displayOff();
+    displayTimer.detach();
     displayOn = false;
   }
 }
