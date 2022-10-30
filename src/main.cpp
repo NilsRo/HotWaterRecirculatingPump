@@ -183,9 +183,9 @@ void handleRoot()
     s += "stopped";
   s += "</li></ul>";
   s += "<p><h3>" + String(nils_length(pump)) +  " Last pump actions</h3>";
-    for (unsigned int i = 0; i < nils_length(pump); i++)
+    for (int i = 0; i < nils_length(pump); i++)
     { // display last 5 pumpOn Events in right order
-      s += String(i + 1) + ": " + pump[(pumpCnt - i) % nils_length(pump)] + "<br>";
+      s += String(i + 1) + ": " + pump[(((int)pumpCnt) - i) % nils_length(pump)] + "<br>";
     }
   uptime::calculateUptime();
   sprintf(tempStr, "%03u Tage %02u:%02u:%02u", uptime::getDays(), uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
@@ -479,7 +479,7 @@ void updateDisplay()
     display.setTextAlignment(TEXT_ALIGN_LEFT);
     for (int i = lineStart; i <= lineEnd; i++)
     { // display last 5 pumpOn Events in right order
-      display.drawString(0, lineCnt * 10 + 2, String(i + 1) + ": " + pump[(pumpCnt - i) % nils_length(pump)]);
+      display.drawString(0, lineCnt * 10 + 2, String(i + 1) + ": " + pump[(((int)pumpCnt) - i) % nils_length(pump)]);
       lineCnt++;
     }
     if ((10000 < now - pumpLastRunsChange))
