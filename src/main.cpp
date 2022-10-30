@@ -128,6 +128,11 @@ iotwebconf::SelectTParameter<STRING_LEN> tempIntParam =
     iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempIntParam").label("Sensor Internal").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("3").build();
 iotwebconf::FloatTParameter tempRetDiffParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("tempRetDiffParam").label("Return Off Diff").defaultValue(10.0).step(0.5).placeholder("e.g. 23.4").build();
 
+int mod( int x, int y )
+{
+  return x<0 ? ((x+1)%y)+y-1 : x%y;
+}
+
 // -- SECTION: Wifi Manager
 void handleRoot()
 {
@@ -185,7 +190,8 @@ void handleRoot()
   s += "<p><h3>" + String(nils_length(pump)) +  " Last pump actions</h3>";
     for (int i = 0; i < nils_length(pump); i++)
     { // display last 5 pumpOn Events in right order
-      s += String(i + 1) + ": " + pump[(((int)pumpCnt) - i) % nils_length(pump)] + "<br>";
+      byte arrIndex = mod((((int)pumpCnt) - i), nils_length(pump));
+      s += String(i + 1) + ": " + pump[arrIndex] + "<br>";
     }
   uptime::calculateUptime();
   sprintf(tempStr, "%03u Tage %02u:%02u:%02u", uptime::getDays(), uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
@@ -479,7 +485,8 @@ void updateDisplay()
     display.setTextAlignment(TEXT_ALIGN_LEFT);
     for (int i = lineStart; i <= lineEnd; i++)
     { // display last 5 pumpOn Events in right order
-      display.drawString(0, lineCnt * 10 + 2, String(i + 1) + ": " + pump[(((int)pumpCnt) - i) % nils_length(pump)]);
+      byte arrIndex = mod((((int)pumpCnt) - i), nils_length(pump));
+      display.drawString(0, lineCnt * 10 + 2, String(i + 1) + ": " + pump[arrIndex]);
       lineCnt++;
     }
     if ((10000 < now - pumpLastRunsChange))
