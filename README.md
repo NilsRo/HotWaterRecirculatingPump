@@ -41,13 +41,24 @@ To setup the device it will open an Access Point named "Zirkulationspumpe" to pr
 
 OLED infos
 ![Displaypage1](img/Displaypage1.JPG)
+<div style="width:50% ; height:50%">
 ![Displaypage2](img/Displaypage2.JPG)
+</div>
+<div style="width:50% ; height:50%">
 ![Displaypage3](img/Displaypage3.JPG)
+</div>
+<div style="width:50% ; height:50%">
 ![Displaypage4](img/Displaypage4.JPG)
+</div>
+<div style="width:50% ; height:50%">
 ![Displaypage5](img/Displaypage5.JPG)
+</div>
+<div style="width:50% ; height:50%">
 ![Displaypage6](img/Displaypage6.JPG)
+</div>
+<div style="width:50% ; height:50%">
 ![Displaypage7](img/Displaypage7.JPG)
-
+</div>
 # ToDos
 * made a better documentation
 * Test the detection of the pump events
