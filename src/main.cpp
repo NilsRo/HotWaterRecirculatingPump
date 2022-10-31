@@ -103,7 +103,7 @@ int networksPage = 0;
 unsigned int networksPageTotal = 0;
 unsigned long networksPageChange = 0;
 
-#define CONFIG_VERSION "1"
+#define CONFIG_VERSION "2"
 int iotWebConfPinState = HIGH;
 unsigned long iotWebConfLastChanged = 0;
 DNSServer dnsServer;
