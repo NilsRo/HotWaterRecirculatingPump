@@ -39,26 +39,15 @@ To setup the device it will open an Access Point named "Zirkulationspumpe" to pr
 
 ![config page](img/opera_2022-10-31%20213941.png)
 
-OLED infos
+## OLED infos
 ![Displaypage1](img/Displaypage1.JPG)
-<div style="width:50% ; height:50%">
-![Displaypage2](img/Displaypage2.JPG)
-</div>
-<div style="width:50% ; height:50%">
-![Displaypage3](img/Displaypage3.JPG)
-</div>
-<div style="width:50% ; height:50%">
-![Displaypage4](img/Displaypage4.JPG)
-</div>
-<div style="width:50% ; height:50%">
-![Displaypage5](img/Displaypage5.JPG)
-</div>
-<div style="width:50% ; height:50%">
-![Displaypage6](img/Displaypage6.JPG)
-</div>
-<div style="width:50% ; height:50%">
-![Displaypage7](img/Displaypage7.JPG)
-</div>
+<img src="img/Displaypage2.JPG"  width="30%" height="30%">
+<img src="img/Displaypage3.JPG"  width="30%" height="30%">
+<img src="img/Displaypage4.JPG"  width="30%" height="30%">
+<img src="img/Displaypage5.JPG"  width="30%" height="30%">
+<img src="img/Displaypage6.JPG"  width="30%" height="30%">
+<img src="img/Displaypage7.JPG"  width="30%" height="30%">
+
 # ToDos
 * made a better documentation
 * Test the detection of the pump events
