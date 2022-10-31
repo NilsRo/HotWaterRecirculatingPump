@@ -63,10 +63,6 @@ bool pumpFirstCall = true;
 int displayPinState = HIGH;
 unsigned long pumpLastRunsChange = 0;
 bool displayOn = true;
-
-char mqttServer[STRING_LEN];
-char mqttUser[STRING_LEN];
-char mqttPassword[STRING_LEN];
 bool needReset = false;
 
 // For a cloud MQTT broker, type the domain name
@@ -78,12 +74,18 @@ bool needReset = false;
 #define MQTT_PUB_PUMP "ww/ht/dhw_pump_circulation"
 #define MQTT_PUB_INFO "ww/ht/info"
 AsyncMqttClient mqttClient;
+char mqttServer[STRING_LEN];
+char mqttUser[STRING_LEN];
+char mqttPassword[STRING_LEN];
+char mqttHeaterStatusTopic[STRING_LEN];
+char mqttHeaterStatusValue[STRING_LEN];
+char heaterStatus[STRING_LEN];
 
 Ticker mqttReconnectTimer;
 Ticker disinfection24hTimer;
 Ticker secTimer;
 Ticker displayTimer;
-Ticker publishUptimeTimer;
+Ticker sec10Timer;
 
 
 WiFiUDP ntpUDP;
@@ -116,6 +118,8 @@ IotWebConfParameterGroup mqttGroup = IotWebConfParameterGroup("mqtt", "MQTT conf
 IotWebConfTextParameter mqttServerParam = IotWebConfTextParameter("MQTT server", "mqttServer", mqttServer, STRING_LEN);
 IotWebConfTextParameter mqttUserNameParam = IotWebConfTextParameter("MQTT user", "mqttUser", mqttUser, STRING_LEN);
 IotWebConfPasswordParameter mqttUserPasswordParam = IotWebConfPasswordParameter("MQTT password", "mqttPassword", mqttPassword, STRING_LEN);
+IotWebConfTextParameter mqttHeaterStatusTopicParam = IotWebConfTextParameter("MQTT Heater Status Subscription", "mqttHeaterStatusTopic", mqttHeaterStatusTopic, STRING_LEN, "");
+IotWebConfTextParameter mqttHeaterStatusValueParam = IotWebConfTextParameter("MQTT Heater Status Value", "mqttHeaterStatusValue", mqttHeaterStatusValue, STRING_LEN, "");
 IotWebConfParameterGroup ntpGroup = IotWebConfParameterGroup("ntp", "NTP configuration");
 IotWebConfTextParameter ntpServerParam = IotWebConfTextParameter("NTP Server", "ntpServer", ntpServer, STRING_LEN, "at.pool.ntp.org");
 IotWebConfTextParameter ntpTimezoneParam = IotWebConfTextParameter("NTP timezone", "ntpTimezone", ntpTimezone, STRING_LEN, "CET-1CEST,M3.5.0/02,M10.5.0/03");
@@ -182,10 +186,15 @@ void handleRoot()
   s += tempRetDiffParam.value();
   s += "&#8451;</li>";
   s += "<li>Pump: ";
-  if (pumpRunning)
-    s += "running";
+  if (strcmp(heaterStatus, mqttHeaterStatusValue) == 0)
+  {
+    if (pumpRunning)
+      s += "running";
+    else
+      s += "stopped";
+  }
   else
-    s += "stopped";
+    s += "heater off";  
   s += "</li></ul>";
   s += "<p><h3>" + String(nils_length(pump)) +  " Last pump actions</h3>";
     for (int i = 0; i < nils_length(pump); i++)
@@ -257,6 +266,7 @@ void onMqttConnect(bool sessionPresent)
   Serial.println("Connected to MQTT.");
   Serial.print("Session present: ");
   Serial.println(sessionPresent);
+  uint16_t packetIdSub = mqttClient.subscribe(mqttHeaterStatusTopic, 2);
   digitalWrite(LED_BUILTIN, HIGH);
 }
 
@@ -277,7 +287,34 @@ void onMqttPublish(uint16_t packetId)
   // Serial.print("  packetId: ");
   // Serial.println(packetId);
 }
+
+void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
+  // Serial.println("Publish received.");
+  // Serial.print("  topic: ");
+  // Serial.println(topic);
+  // Serial.print("  qos: ");
+  // Serial.println(properties.qos);
+  // Serial.print("  payload: ");
+  // Serial.println(payload);
+  // Serial.print("  dup: ");
+  // Serial.println(properties.dup);
+  // Serial.print("  retain: ");
+  // Serial.println(properties.retain);
+  // Serial.print("  len: ");
+  // Serial.println(len);
+  // Serial.print("  index: ");
+  // Serial.println(index);
+  // Serial.print("  total: ");
+  // Serial.println(total);
+  char new_payload[len+1];
+  strncpy(new_payload, payload, len);
+  new_payload[len] = '\0';
+  Serial.print("heater status: ");
+  Serial.println(new_payload);
+  strncpy(heaterStatus, new_payload, sizeof(heaterStatus));
+}
 //-- END SECTION: connection handling
+
 void checkSensors()
 {
   if (sensorDetectionError)
@@ -305,7 +342,6 @@ void checkSensors()
 
 void getTemp()
 {
-  char msg_out[20];
   sensors.requestTemperatures(); // Send the command to get temperatures
   tempOut = sensors.getTempC(sensorOut_id);
   tempRet = sensors.getTempC(sensorRet_id);
@@ -316,7 +352,12 @@ void getTemp()
   Serial.println(tempRet);
   Serial.print(" Temp Int: ");
   Serial.println(tempInt);
-  if (mqttClient.connected())
+}
+
+void mqttSendtemp()
+{
+char msg_out[20];
+if (mqttClient.connected())
   {
     dtostrf(tempOut, 2, 2, msg_out);
     mqttClient.publish(MQTT_PUB_TEMP_OUT, 0, true, msg_out);
@@ -377,7 +418,7 @@ void publishUptime()
   char msg_out[20];
   uptime::calculateUptime();
   sprintf(msg_out, "%03u Tage %02u:%02u:%02u", uptime::getDays(), uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
-  Serial.println(msg_out);
+  // Serial.println(msg_out);
   if (mqttClient.connected()) mqttClient.publish(MQTT_PUB_INFO, 0, true, msg_out);
 }
 
@@ -773,7 +814,7 @@ void check()
       if (!pumpRunning)
       {
         temperatur_delta = t[checkCnt] - t[cnt_alt]; // Difference to 5 sec before
-        if (temperatur_delta >= 0.12 && (300000 < millis() - pumpBlock || pumpFirstCall))
+        if (temperatur_delta >= 0.12 && (300000 < millis() - pumpBlock || pumpFirstCall) && heaterStatus == mqttHeaterStatusValue)
         { // smallest temp change is 0,12°C,
           Serial.print("Temperature Delta: ");
           Serial.println(temperatur_delta);
@@ -796,6 +837,12 @@ void onSecTimer()
   updateTime();
   check();
 }
+
+void onSec10Timer()
+  {
+    publishUptime();
+    mqttSendtemp();
+  }
 
 void setup()
 {
@@ -831,6 +878,8 @@ void setup()
   mqttGroup.addItem(&mqttServerParam);
   mqttGroup.addItem(&mqttUserNameParam);
   mqttGroup.addItem(&mqttUserPasswordParam);
+  mqttGroup.addItem(&mqttHeaterStatusTopicParam);
+  mqttGroup.addItem(&mqttHeaterStatusValueParam);
   iotWebConf.addParameterGroup(&mqttGroup);
   ntpGroup.addItem(&ntpServerParam);
   ntpGroup.addItem(&ntpTimezoneParam);
@@ -866,6 +915,8 @@ void setup()
   mqttClient.onConnect(onMqttConnect);
   mqttClient.onDisconnect(onMqttDisconnect);
   mqttClient.onPublish(onMqttPublish);
+  mqttClient.onMessage(onMqttMessage);
+
   if (mqttUser != "")
     mqttClient.setCredentials(mqttUser, mqttPassword);
   mqttClient.setServer(mqttServer, MQTT_PORT);
@@ -928,7 +979,7 @@ void setup()
   // Timers
   disinfection24hTimer.attach(86400, disinfection);
   secTimer.attach(1, onSecTimer);
-  publishUptimeTimer.attach(10, publishUptime);
+  sec10Timer.attach(10, onSec10Timer);
   displayTimer.attach_ms(500, updateDisplay);
 }
 
@@ -1015,11 +1066,11 @@ void loop()
     }
     else
     {
-      timePressed = millis();
+      timePressed = now;
       Serial.println("Button pressed");
     }
   }
-  if (pumpLastRunsChange > 600000)
+  if (600000 < now - pumpLastRunsChange)
   { // switch display off after 10mins
     display.displayOff();
     displayTimer.detach();
