@@ -50,7 +50,6 @@ To setup the device it will open an Access Point named "Zirkulationspumpe" to pr
 
 # ToDos
 * made a better documentation
-* Test the detection of the pump events
 * Make OLED language configurable
 
 # Note
