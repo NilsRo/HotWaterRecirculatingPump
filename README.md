@@ -4,8 +4,9 @@ Automation of hot water recirculating pump via ESP32
 The project (actually with german LCD GUI) follows the ideas of https://github.com/MakeMagazinDE/Zirkulationspumpensteuerung and http://www.kabza.de/MyHome/CircPump/CirculationPump.php to control the hot water recirculation pump (Warmwasserzirkulationspumpe) via two temperature sensors comparing the warm water out and return temperature.
 
 Featurelist
-* Control the pump via out and return temperautre sensor
-* MQTT messaging to get logging information
+* Control the pump via out and return temperature sensor
+* MQTT publishing to get logging information
+* MQTT subscription to get heater information like provided by https://github.com/norberts1/hometop_HT3
 * Realtime Clock support to maintain sleep ciycles and also cleaning everything every 24h
 * 2 relay support to add e.g. a magnetic vent
 * SSD1306 support to view status information
@@ -19,9 +20,33 @@ Featurelist
 
 ![Case](img/SpaceClaim_2022-10-28%20163143.png)
 ![Open Case](img/SpaceClaim_2022-10-28%20163208.png)
+![Case with components mounted](img/Case%20with%20components.JPG)
 
 # Software
 To setup the device it will open an Access Point named "Zirkulationspumpe" to provide an configuration interface. It is still available after the device is connected to an WiFi Network so you can do the 1-Wire configuration later. You have to mount the sensor 50cm from the hot water reserviour.
+
+1. system configuration and hostname to get an WiFi connection (everything later can be configured later via the normal network)
+2. MQTT configuration to publish the following topics: 
+    * "ww/ht/dhw_Tflow_measured": out temperature of the warm water
+    * "ww/ht/dhw_Treturn": return temperture of the warm water circulation
+    * "ww/ht/Tint": system internal temperture
+    * "ww/ht/dhw_pump_circulation": pump is running or not
+    * "ww/ht/info": system information as text
+3. MQTT configuration for heater status subscription to block pump if heater is off
+4. NTP configuration to get the RTC infos for logging
+5. Temperature configuration to map the DS18B20 sensors detected
+6. Return Temperature that the pump can switch off when the water is gone through the whole circulation pipe.
+
+![config page](img/opera_2022-10-31%20213941.png)
+
+OLED infos
+![Displaypage1](img/Displaypage1.JPG)
+![Displaypage2](img/Displaypage2.JPG)
+![Displaypage3](img/Displaypage3.JPG)
+![Displaypage4](img/Displaypage4.JPG)
+![Displaypage5](img/Displaypage5.JPG)
+![Displaypage6](img/Displaypage6.JPG)
+![Displaypage7](img/Displaypage7.JPG)
 
 # ToDos
 * made a better documentation
