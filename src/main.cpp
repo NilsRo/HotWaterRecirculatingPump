@@ -814,7 +814,7 @@ void check()
       if (!pumpRunning)
       {
         temperatur_delta = t[checkCnt] - t[cnt_alt]; // Difference to 5 sec before
-        if (temperatur_delta >= 0.12 && (300000 < millis() - pumpBlock || pumpFirstCall) && heaterStatus == mqttHeaterStatusValue)
+        if (temperatur_delta >= 0.12 && (300000 < millis() - pumpBlock || pumpFirstCall) && (strcmp(heaterStatus, mqttHeaterStatusValue) == 0 || !mqttClient.connected()))
         { // smallest temp change is 0,12°C,
           Serial.print("Temperature Delta: ");
           Serial.println(temperatur_delta);
