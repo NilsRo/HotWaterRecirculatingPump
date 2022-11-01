@@ -6,7 +6,7 @@ The project (actually with german LCD GUI) follows the ideas of https://github.c
 Featurelist
 * Control the pump via out and return temperature sensor
 * MQTT publishing to get logging information
-* MQTT subscription to get heater information like provided by https://github.com/norberts1/hometop_HT3
+* MQTT subscription to get heater information and heater pump trigger like provided by https://github.com/norberts1/hometop_HT3
 * Realtime Clock support to maintain sleep ciycles and also cleaning everything every 24h
 * 2 relay support to add e.g. a magnetic vent
 * SSD1306 support to view status information
@@ -32,7 +32,7 @@ To setup the device it will open an Access Point named "Zirkulationspumpe" to pr
     * "ww/ht/Tint": system internal temperture
     * "ww/ht/dhw_pump_circulation": pump is running or not
     * "ww/ht/info": system information as text
-3. MQTT configuration for heater status subscription to block pump if heater is off
+3. MQTT configuration for heater status subscription to block pump if heater is off and additional external pump control
 4. NTP configuration to get the RTC infos for logging
 5. Temperature configuration to map the DS18B20 sensors detected
 6. Return Temperature that the pump can switch off when the water is gone through the whole circulation pipe.

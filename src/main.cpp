@@ -80,6 +80,9 @@ char mqttPassword[STRING_LEN];
 char mqttHeaterStatusTopic[STRING_LEN];
 char mqttHeaterStatusValue[STRING_LEN];
 char heaterStatus[STRING_LEN];
+char mqttPumpTopic[STRING_LEN];
+char mqttPumpValue[STRING_LEN];
+bool mqttPump = false;
 
 Ticker mqttReconnectTimer;
 Ticker disinfection24hTimer;
@@ -120,8 +123,10 @@ IotWebConfTextParameter mqttUserNameParam = IotWebConfTextParameter("MQTT user",
 IotWebConfPasswordParameter mqttUserPasswordParam = IotWebConfPasswordParameter("MQTT password", "mqttPassword", mqttPassword, STRING_LEN);
 IotWebConfTextParameter mqttHeaterStatusTopicParam = IotWebConfTextParameter("MQTT Heater Status Subscription", "mqttHeaterStatusTopic", mqttHeaterStatusTopic, STRING_LEN, "");
 IotWebConfTextParameter mqttHeaterStatusValueParam = IotWebConfTextParameter("MQTT Heater Status Value", "mqttHeaterStatusValue", mqttHeaterStatusValue, STRING_LEN, "");
+IotWebConfTextParameter mqttPumpTopicParam = IotWebConfTextParameter("MQTT external pump start Subscription", "mqttPumpTopic", mqttPumpTopic, STRING_LEN, "");
+IotWebConfTextParameter mqttPumpValueParam = IotWebConfTextParameter("MQTT external pump start Value", "mqttPumpValue", mqttPumpValue, STRING_LEN, "");
 IotWebConfParameterGroup ntpGroup = IotWebConfParameterGroup("ntp", "NTP configuration");
-IotWebConfTextParameter ntpServerParam = IotWebConfTextParameter("NTP Server", "ntpServer", ntpServer, STRING_LEN, "at.pool.ntp.org");
+IotWebConfTextParameter ntpServerParam = IotWebConfTextParameter("NTP Server", "ntpServer", ntpServer, STRING_LEN, "de.pool.ntp.org");
 IotWebConfTextParameter ntpTimezoneParam = IotWebConfTextParameter("NTP timezone", "ntpTimezone", ntpTimezone, STRING_LEN, "CET-1CEST,M3.5.0/02,M10.5.0/03");
 IotWebConfParameterGroup tempGroup = IotWebConfParameterGroup("temp", "Temperature configuration");
 iotwebconf::SelectTParameter<STRING_LEN> tempOutParam =
@@ -214,6 +219,7 @@ void handleRoot()
 void configSaved()
 {
   Serial.println("Configuration saved.");
+  // TODO: Neustart bei normalen Parametern vermeiden
   needReset = true;
 }
 
@@ -266,7 +272,9 @@ void onMqttConnect(bool sessionPresent)
   Serial.println("Connected to MQTT.");
   Serial.print("Session present: ");
   Serial.println(sessionPresent);
-  uint16_t packetIdSub = mqttClient.subscribe(mqttHeaterStatusTopic, 2);
+  uint16_t packetIdSub;
+  if (mqttHeaterStatusTopic != "") packetIdSub = mqttClient.subscribe(mqttHeaterStatusTopic, 2);
+  if (mqttPumpTopic != "") packetIdSub = mqttClient.subscribe(mqttPumpTopic, 2);
   digitalWrite(LED_BUILTIN, HIGH);
 }
 
@@ -308,10 +316,19 @@ void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties 
   // Serial.println(total);
   char new_payload[len+1];
   strncpy(new_payload, payload, len);
-  new_payload[len] = '\0';
-  Serial.print("heater status: ");
-  Serial.println(new_payload);
-  strncpy(heaterStatus, new_payload, sizeof(heaterStatus));
+  new_payload[len] = '\0';  
+  if (topic == mqttPumpTopic)
+  {
+    Serial.print("mqtt pump: ");
+    Serial.println(new_payload);
+    mqttPump = (mqttPumpValue == new_payload);
+  }
+  else if (topic == mqttHeaterStatusTopic)
+  {
+    Serial.print("mqtt heater status: ");
+    Serial.println(new_payload);
+    strncpy(heaterStatus, new_payload, sizeof(heaterStatus));
+  }
 }
 //-- END SECTION: connection handling
 
@@ -814,10 +831,15 @@ void check()
       if (!pumpRunning)
       {
         temperatur_delta = t[checkCnt] - t[cnt_alt]; // Difference to 5 sec before
-        if (temperatur_delta >= 0.12 && (300000 < millis() - pumpBlock || pumpFirstCall) && (strcmp(heaterStatus, mqttHeaterStatusValue) == 0 || !mqttClient.connected()))
+        if ((temperatur_delta >= 0.12 || mqttPump) && (300000 < millis() - pumpBlock || pumpFirstCall) && (strcmp(heaterStatus, mqttHeaterStatusValue) == 0 || !mqttClient.connected()))
         { // smallest temp change is 0,12°C,
           Serial.print("Temperature Delta: ");
           Serial.println(temperatur_delta);
+          if (mqttPump)
+          {
+            mqttPump = false;
+            Serial.println("MQTT pump action done");
+          }
           pumpBlock = millis();
           pumpFirstCall = false;
           pumpOn();
@@ -880,6 +902,8 @@ void setup()
   mqttGroup.addItem(&mqttUserPasswordParam);
   mqttGroup.addItem(&mqttHeaterStatusTopicParam);
   mqttGroup.addItem(&mqttHeaterStatusValueParam);
+  mqttGroup.addItem(&mqttPumpTopicParam);
+  mqttGroup.addItem(&mqttPumpValueParam);
   iotWebConf.addParameterGroup(&mqttGroup);
   ntpGroup.addItem(&ntpServerParam);
   ntpGroup.addItem(&ntpTimezoneParam);
