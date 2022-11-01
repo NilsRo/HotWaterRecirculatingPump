@@ -61,7 +61,7 @@ unsigned int displayPageLastRuns = 1;
 bool networksPageFirstCall = true;
 bool pumpFirstCall = true;
 int displayPinState = HIGH;
-unsigned long pumpLastRunsChange = 0;
+unsigned int displayPinChanged = 0;
 bool displayOn = true;
 bool needReset = false;
 
@@ -104,11 +104,11 @@ unsigned long lastScan = 0;
 int networksFound;
 int networksPage = 0;
 unsigned int networksPageTotal = 0;
-unsigned long networksPageChange = 0;
+unsigned long displayPageSubChange = 0;
 
 #define CONFIG_VERSION "2"
 int iotWebConfPinState = HIGH;
-unsigned long iotWebConfLastChanged = 0;
+unsigned long iotWebConfPinChanged = 0;
 DNSServer dnsServer;
 WebServer server(80);
 HTTPUpdateServer httpUpdater;
@@ -587,13 +587,13 @@ void updateDisplay()
       display.drawString(0, lineCnt * 10 + 2, String(i + 1) + ": " + pump[arrIndex]);
       lineCnt++;
     }
-    if ((10000 < now - pumpLastRunsChange))
+    if ((10000 < now - displayPageSubChange))
       {
         if (displayPageLastRuns < nils_length(pump) / 5)
           displayPageLastRuns++;
         else
           displayPageLastRuns = 1;
-        pumpLastRunsChange = now;
+        displayPageSubChange = now;
       }
     break;
   case 2:
@@ -768,7 +768,7 @@ void updateDisplay()
         if (networksPageFirstCall)
         {
           networksPageFirstCall = false;
-          networksPageChange = now;
+          displayPageSubChange = now;
           networksPageTotal = (int)ceil(networksFound / 5.0);
           lastScan = now;
         }
@@ -792,13 +792,13 @@ void updateDisplay()
           display.drawString(0, 1 + (10 * lineCnt), String(i + 1) + ": " +String(WiFi.SSID(i)) + " (" + String(WiFi.RSSI(i)) + ")");
           lineCnt++;
         }
-        if ((10000 < now - networksPageChange) && networksPageTotal > 1)
+        if ((10000 < now - displayPageSubChange) && networksPageTotal > 1)
         {
           if (networksPage < networksPageTotal)
             networksPage++;
           else
             networksPage = 1;
-          networksPageChange = now;
+          displayPageSubChange = now;
         }
       }
     }
@@ -1062,10 +1062,10 @@ void loop()
 
   // Check buttons
   unsigned long now = millis();
-  if ((500 < now - iotWebConfLastChanged) && (iotWebConfPinState != digitalRead(WIFICONFIGPIN)))
+  if ((500 < now - iotWebConfPinChanged) && (iotWebConfPinState != digitalRead(WIFICONFIGPIN)))
   {
     iotWebConfPinState = 1 - iotWebConfPinState; // invert pin state as it is changed
-    iotWebConfLastChanged = now;
+    iotWebConfPinChanged = now;
     if (iotWebConfPinState)
     { // reset settings and reboot
       iotWebConf.getRootParameterGroup()->applyDefaultValue();
@@ -1073,9 +1073,10 @@ void loop()
       needReset = true;
     }
   }
-  if ((500 < now - pumpLastRunsChange) && (displayPinState != digitalRead(DISPLAYPIN)))
+  if ((500 < now - displayPinChanged) && (displayPinState != digitalRead(DISPLAYPIN)))
   {
     displayPinState = 1 - displayPinState; // invert pin state as it is changed
+    displayPinChanged = now;
     if (displayPinState) // button pressed action - set pressed time
     {
       // button released
@@ -1109,6 +1110,7 @@ void loop()
           }
           else
           {
+            displayPageSubChange = now;    //init the subpage timer
             if (displayPage == 6)
               displayPage = 0;
             else
