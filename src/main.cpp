@@ -18,7 +18,7 @@
 #include <algorithm>
 
 #define STRING_LEN 128
-#define nils_length(x) ((sizeof(x)/sizeof(0[x])) / ((size_t)(!(sizeof(x) % sizeof(0[x])))))
+#define nils_length(x) ((sizeof(x) / sizeof(0 [x])) / ((size_t)(!(sizeof(x) % sizeof(0 [x])))))
 // #define nils_length( x ) ( sizeof(x) )
 
 // ports
@@ -28,7 +28,7 @@ const int VALVEPIN = D4;
 const int DISPLAYPIN = D5;
 const int WIFICONFIGPIN = D7;
 
-String pump[20] = {"", "", "", "", "","", "", "", "", "","", "", "", "", "","", "", "", "", ""};
+String pump[20] = {"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""};
 unsigned int pumpCnt = 0;
 bool pumpCntInit = true;
 static float t[] = {255.0, 255.0, 255.0, 255.0, 255.0}; // letzten 5 Temepraturwerte speichern
@@ -92,7 +92,6 @@ Ticker secTimer;
 Ticker displayTimer;
 Ticker sec10Timer;
 
-
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP);
 char ntpServer[STRING_LEN];
@@ -141,9 +140,9 @@ iotwebconf::SelectTParameter<STRING_LEN> tempIntParam =
     iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempIntParam").label("Sensor Internal").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("3").build();
 iotwebconf::FloatTParameter tempRetDiffParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("tempRetDiffParam").label("Return Off Diff").defaultValue(10.0).step(0.5).placeholder("e.g. 23.4").build();
 
-int mod( int x, int y )
+int mod(int x, int y)
 {
-  return x<0 ? ((x+1)%y)+y-1 : x%y;
+  return x < 0 ? ((x + 1) % y) + y - 1 : x % y;
 }
 
 // -- SECTION: Wifi Manager
@@ -203,14 +202,14 @@ void handleRoot()
       s += "stopped";
   }
   else
-    s += "heater off";  
+    s += "heater off";
   s += "</li></ul>";
-  s += "<p><h3>" + String(nils_length(pump)) +  " Last pump actions</h3>";
-    for (int i = 0; i < nils_length(pump); i++)
-    { // display last 5 pumpOn Events in right order
-      byte arrIndex = mod((((int)pumpCnt) - i), nils_length(pump));
-      s += String(i + 1) + ": " + pump[arrIndex] + "<br>";
-    }
+  s += "<p><h3>" + String(nils_length(pump)) + " Last pump actions</h3>";
+  for (int i = 0; i < nils_length(pump); i++)
+  { // display last 5 pumpOn Events in right order
+    byte arrIndex = mod((((int)pumpCnt) - i), nils_length(pump));
+    s += String(i + 1) + ": " + pump[arrIndex] + "<br>";
+  }
   uptime::calculateUptime();
   sprintf(tempStr, "%03u Tage %02u:%02u:%02u", uptime::getDays(), uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
   s += "<p>Uptime: " + String(tempStr);
@@ -277,9 +276,9 @@ void onMqttConnect(bool sessionPresent)
   Serial.print("Session present: ");
   Serial.println(sessionPresent);
   uint16_t packetIdSub;
-  if (strlen(mqttHeaterStatusTopic)> 0) 
+  if (strlen(mqttHeaterStatusTopic) > 0)
   {
-    
+
     packetIdSub = mqttClient.subscribe(mqttHeaterStatusTopic, 2);
     Serial.print("Subscribed to topic: ");
     Serial.println(String(mqttHeaterStatusTopic) + " - " + String(packetIdSub));
@@ -290,36 +289,36 @@ void onMqttConnect(bool sessionPresent)
     // Serial.println(HEX(mqttPumpTopic));
     packetIdSub = mqttClient.subscribe(mqttPumpTopic, 2);
     Serial.print("Subscribed to topic: ");
-    Serial.println(String(mqttPumpTopic) + " - " + String(packetIdSub));    
+    Serial.println(String(mqttPumpTopic) + " - " + String(packetIdSub));
   }
   digitalWrite(LED_BUILTIN, HIGH);
 }
 
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason)
 {
-String text; 
-  switch(reason) {
+  String text;
+  switch (reason)
+  {
   case AsyncMqttClientDisconnectReason::TCP_DISCONNECTED:
-     text = "TCP_DISCONNECTED"; 
-     break; 
+    text = "TCP_DISCONNECTED";
+    break;
   case AsyncMqttClientDisconnectReason::MQTT_UNACCEPTABLE_PROTOCOL_VERSION:
-     text = "MQTT_UNACCEPTABLE_PROTOCOL_VERSION"; 
-     break; 
+    text = "MQTT_UNACCEPTABLE_PROTOCOL_VERSION";
+    break;
   case AsyncMqttClientDisconnectReason::MQTT_IDENTIFIER_REJECTED:
-     text = "MQTT_IDENTIFIER_REJECTED";  
-     break;
-  case AsyncMqttClientDisconnectReason::MQTT_SERVER_UNAVAILABLE: 
-     text = "MQTT_SERVER_UNAVAILABLE"; 
-     break;
+    text = "MQTT_IDENTIFIER_REJECTED";
+    break;
+  case AsyncMqttClientDisconnectReason::MQTT_SERVER_UNAVAILABLE:
+    text = "MQTT_SERVER_UNAVAILABLE";
+    break;
   case AsyncMqttClientDisconnectReason::MQTT_MALFORMED_CREDENTIALS:
-     text = "MQTT_MALFORMED_CREDENTIALS"; 
-     break;
+    text = "MQTT_MALFORMED_CREDENTIALS";
+    break;
   case AsyncMqttClientDisconnectReason::MQTT_NOT_AUTHORIZED:
-     text = "MQTT_NOT_AUTHORIZED"; 
-     break;
-  
+    text = "MQTT_NOT_AUTHORIZED";
+    break;
   }
-  Serial.printf(" [%8u] Disconnected from the broker reason = %s\n", millis(), text.c_str() );
+  Serial.printf(" [%8u] Disconnected from the broker reason = %s\n", millis(), text.c_str());
   Serial.printf(" [%8u] Reconnecting to MQTT..\n", millis());
   digitalWrite(LED_BUILTIN, LOW);
 
@@ -329,8 +328,9 @@ String text;
   }
 }
 
-void onMqttSubscribe(uint16_t packetId, uint8_t qos) {
-  Serial.printf(" [%8u] Subscribe acknowledged id: %u, qos: %u\n", millis() ,packetId, qos);
+void onMqttSubscribe(uint16_t packetId, uint8_t qos)
+{
+  Serial.printf(" [%8u] Subscribe acknowledged id: %u, qos: %u\n", millis(), packetId, qos);
 }
 
 void onMqttPublish(uint16_t packetId)
@@ -340,7 +340,8 @@ void onMqttPublish(uint16_t packetId)
   // Serial.println(packetId);
 }
 
-void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
+void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total)
+{
   // Serial.println("Publish received.");
   // Serial.print("  topic: ");
   // Serial.println(topic);
@@ -358,9 +359,9 @@ void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties 
   // Serial.println(index);
   // Serial.print("  total: ");
   // Serial.println(total);
-  char new_payload[len+1];
+  char new_payload[len + 1];
   strncpy(new_payload, payload, len);
-  new_payload[len] = '\0';  
+  new_payload[len] = '\0';
   if (strcmp(topic, mqttPumpTopic) == 0)
   {
     Serial.print("mqtt pump: ");
@@ -372,7 +373,7 @@ void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties 
     Serial.print("mqtt thermal desinfection: ");
     Serial.println(new_payload);
     mqttPump = (mqttThermalDesinfectionValue == new_payload);
-  }  
+  }
   else if (strcmp(topic, mqttHeaterStatusTopic) == 0)
   {
     Serial.print("mqtt heater status: ");
@@ -386,7 +387,8 @@ void checkSensors()
 {
   if (sensorDetectionError)
   {
-    if (mqttClient.connected()) mqttClient.publish(MQTT_PUB_INFO, 0, true, "Sensorfehler");
+    if (mqttClient.connected())
+      mqttClient.publish(MQTT_PUB_INFO, 0, true, "Sensorfehler");
     sensorError = true;
   }
   else
@@ -401,7 +403,8 @@ void checkSensors()
     }
     else
     {
-      if (mqttClient.connected()) mqttClient.publish(MQTT_PUB_INFO, 0, true, "Sensorfehler");
+      if (mqttClient.connected())
+        mqttClient.publish(MQTT_PUB_INFO, 0, true, "Sensorfehler");
       sensorError = true;
     }
   }
@@ -423,8 +426,8 @@ void getTemp()
 
 void mqttSendtemp()
 {
-char msg_out[20];
-if (mqttClient.connected())
+  char msg_out[20];
+  if (mqttClient.connected())
   {
     dtostrf(tempOut, 2, 2, msg_out);
     mqttClient.publish(MQTT_PUB_TEMP_OUT, 0, true, msg_out);
@@ -486,7 +489,8 @@ void publishUptime()
   uptime::calculateUptime();
   sprintf(msg_out, "%03u Tage %02u:%02u:%02u", uptime::getDays(), uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
   // Serial.println(msg_out);
-  if (mqttClient.connected()) mqttClient.publish(MQTT_PUB_INFO, 0, true, msg_out);
+  if (mqttClient.connected())
+    mqttClient.publish(MQTT_PUB_INFO, 0, true, msg_out);
 }
 
 void updateDisplay()
@@ -585,7 +589,7 @@ void updateDisplay()
     display.setTextAlignment(TEXT_ALIGN_CENTER);
     display.drawString(64, 0, "Letzte Starts");
     display.drawLine(0, 11, 128, 11);
-    lineStart = ((displayPageLastRuns) - 1) * 5;
+    lineStart = ((displayPageLastRuns)-1) * 5;
     lineEnd = lineStart + 4;
     lineCnt = 1;
     display.setTextAlignment(TEXT_ALIGN_RIGHT);
@@ -598,13 +602,13 @@ void updateDisplay()
       lineCnt++;
     }
     if ((10000 < now - displayPageSubChange))
-      {
-        if (displayPageLastRuns < nils_length(pump) / 5)
-          displayPageLastRuns++;
-        else
-          displayPageLastRuns = 1;
-        displayPageSubChange = now;
-      }
+    {
+      if (displayPageLastRuns < nils_length(pump) / 5)
+        displayPageLastRuns++;
+      else
+        displayPageLastRuns = 1;
+      displayPageSubChange = now;
+    }
     break;
   case 2:
     uptime::calculateUptime();
@@ -741,7 +745,7 @@ void updateDisplay()
         WiFi.mode(WIFI_STA);
         WiFi.disconnect();
       }
-      if ((60000 < now - lastScan) && WiFi.getMode() == WIFI_STA)  //blocked for 60s
+      if ((60000 < now - lastScan) && WiFi.getMode() == WIFI_STA) // blocked for 60s
       {
         Serial.println("scan started");
         WiFi.scanDelete();
@@ -782,7 +786,7 @@ void updateDisplay()
           networksPageTotal = (int)ceil(networksFound / 5.0);
           lastScan = now;
         }
-        lineStart = ((networksPage) - 1) * 5;
+        lineStart = ((networksPage)-1) * 5;
         lineEnd = min((lineStart + 4), (unsigned int)networksFound);
         display.setTextAlignment(TEXT_ALIGN_RIGHT);
         display.drawString(127, 0, "(" + String(networksPage) + "/" + String(networksPageTotal) + ")");
@@ -799,7 +803,7 @@ void updateDisplay()
           Serial.println((WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? " " : "*");
           display.setFont(ArialMT_Plain_10);
           display.setTextAlignment(TEXT_ALIGN_LEFT);
-          display.drawString(0, 1 + (10 * lineCnt), String(i + 1) + ": " +String(WiFi.SSID(i)) + " (" + String(WiFi.RSSI(i)) + ")");
+          display.drawString(0, 1 + (10 * lineCnt), String(i + 1) + ": " + String(WiFi.SSID(i)) + " (" + String(WiFi.RSSI(i)) + ")");
           lineCnt++;
         }
         if ((10000 < now - displayPageSubChange) && networksPageTotal > 1)
@@ -820,7 +824,8 @@ void pumpOn()
 {
   char tempStr[128];
   Serial.println("Turn on circulation");
-  if (mqttClient.connected()) mqttClient.publish(MQTT_PUB_PUMP, 0, true, "1");
+  if (mqttClient.connected())
+    mqttClient.publish(MQTT_PUB_PUMP, 0, true, "1");
   pumpRunning = true;
   pumpStartedAt = millis();
   digitalWrite(PUMPPIN, LOW);
@@ -831,14 +836,15 @@ void pumpOn()
   if (pumpCntInit)
     pumpCntInit = false;
   else if (++pumpCnt > nils_length(pump) - 1)
-      pumpCnt = 0; // Reset counter  
+    pumpCnt = 0; // Reset counter
   pump[pumpCnt] = tempStr;
 }
 
 void pumpOff()
 {
   Serial.println("Turn off circulation");
-  if (mqttClient.connected()) mqttClient.publish(MQTT_PUB_PUMP, 0, true, "0");
+  if (mqttClient.connected())
+    mqttClient.publish(MQTT_PUB_PUMP, 0, true, "0");
   pumpRunning = false;
   pump[pumpCnt] += " (" + String((int)round((millis() - pumpStartedAt) / 1000 / 60)) + " min.)";
   digitalWrite(PUMPPIN, HIGH);
@@ -911,10 +917,10 @@ void onSecTimer()
 }
 
 void onSec10Timer()
-  {
-    publishUptime();
-    mqttSendtemp();
-  }
+{
+  publishUptime();
+  mqttSendtemp();
+}
 
 void setup()
 {
@@ -969,7 +975,7 @@ void setup()
   iotWebConf.setConfigSavedCallback(&configSaved);
   iotWebConf.setFormValidator(&formValidator);
   iotWebConf.setWifiConnectionCallback(&onWifiConnected);
-    iotWebConf.setConfigPin(WIFICONFIGPIN);
+  iotWebConf.setConfigPin(WIFICONFIGPIN);
   iotWebConf.init();
   // -- Set up required URL handlers on the web server.
   bool validConfig = iotWebConf.init();
@@ -1122,7 +1128,7 @@ void loop()
           }
           else
           {
-            displayPageSubChange = now;    //init the subpage timer
+            displayPageSubChange = now; // init the subpage timer
             if (displayPage == 6)
               displayPage = 0;
             else
