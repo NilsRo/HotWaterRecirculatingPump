@@ -83,6 +83,8 @@ bool mqttHeaterStatus = true;
 char mqttPumpTopic[STRING_LEN];
 char mqttPumpValue[STRING_LEN];
 bool mqttPump = false;
+char mqttThermalDesinfectionTopic[STRING_LEN];
+char mqttThermalDesinfectionValue[STRING_LEN];
 
 Ticker mqttReconnectTimer;
 Ticker disinfection24hTimer;
@@ -121,10 +123,12 @@ IotWebConfParameterGroup mqttGroup = IotWebConfParameterGroup("mqtt", "MQTT conf
 IotWebConfTextParameter mqttServerParam = IotWebConfTextParameter("MQTT server", "mqttServer", mqttServer, STRING_LEN);
 IotWebConfTextParameter mqttUserNameParam = IotWebConfTextParameter("MQTT user", "mqttUser", mqttUser, STRING_LEN);
 IotWebConfPasswordParameter mqttUserPasswordParam = IotWebConfPasswordParameter("MQTT password", "mqttPassword", mqttPassword, STRING_LEN);
-IotWebConfTextParameter mqttHeaterStatusTopicParam = IotWebConfTextParameter("MQTT Heater Status Subscription", "mqttHeaterStatusTopic", mqttHeaterStatusTopic, STRING_LEN, "");
-IotWebConfTextParameter mqttHeaterStatusValueParam = IotWebConfTextParameter("MQTT Heater Status Value", "mqttHeaterStatusValue", mqttHeaterStatusValue, STRING_LEN, "");
+IotWebConfTextParameter mqttHeaterStatusTopicParam = IotWebConfTextParameter("MQTT Heater Status Subscription", "mqttHeaterStatusTopic", mqttHeaterStatusTopic, STRING_LEN, "ht3/hometop/ht/hc1_Tniveau");
+IotWebConfTextParameter mqttHeaterStatusValueParam = IotWebConfTextParameter("MQTT Heater Status Value", "mqttHeaterStatusValue", mqttHeaterStatusValue, STRING_LEN, "3");
 IotWebConfTextParameter mqttPumpTopicParam = IotWebConfTextParameter("MQTT external pump start Subscription", "mqttPumpTopic", mqttPumpTopic, STRING_LEN, "");
 IotWebConfTextParameter mqttPumpValueParam = IotWebConfTextParameter("MQTT external pump start Value", "mqttPumpValue", mqttPumpValue, STRING_LEN, "");
+IotWebConfTextParameter mqttThermalDesinfectionTopicParam = IotWebConfTextParameter("MQTT thermal desinfection Subscription", "mqttThermalDesinfectionTopic", mqttThermalDesinfectionTopic, STRING_LEN, "ht3/hometop/ht/dhw_thermal_desinfection");
+IotWebConfTextParameter mqttThermalDesinfectionValueParam = IotWebConfTextParameter("MQTT thermal desinfection Value", "mqttThermalDesinfectionValue", mqttThermalDesinfectionValue, STRING_LEN, "1");
 IotWebConfParameterGroup ntpGroup = IotWebConfParameterGroup("ntp", "NTP configuration");
 IotWebConfTextParameter ntpServerParam = IotWebConfTextParameter("NTP Server", "ntpServer", ntpServer, STRING_LEN, "de.pool.ntp.org");
 IotWebConfTextParameter ntpTimezoneParam = IotWebConfTextParameter("NTP timezone", "ntpTimezone", ntpTimezone, STRING_LEN, "CET-1CEST,M3.5.0/02,M10.5.0/03");
@@ -363,6 +367,12 @@ void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties 
     Serial.println(new_payload);
     mqttPump = (mqttPumpValue == new_payload);
   }
+  else if (strcmp(topic, mqttThermalDesinfectionTopic) == 0)
+  {
+    Serial.print("mqtt thermal desinfection: ");
+    Serial.println(new_payload);
+    mqttPump = (mqttThermalDesinfectionValue == new_payload);
+  }  
   else if (strcmp(topic, mqttHeaterStatusTopic) == 0)
   {
     Serial.print("mqtt heater status: ");
@@ -944,6 +954,8 @@ void setup()
   mqttGroup.addItem(&mqttHeaterStatusValueParam);
   mqttGroup.addItem(&mqttPumpTopicParam);
   mqttGroup.addItem(&mqttPumpValueParam);
+  mqttGroup.addItem(&mqttThermalDesinfectionTopicParam);
+  mqttGroup.addItem(&mqttThermalDesinfectionValueParam);
   iotWebConf.addParameterGroup(&mqttGroup);
   ntpGroup.addItem(&ntpServerParam);
   ntpGroup.addItem(&ntpTimezoneParam);
