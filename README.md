@@ -32,7 +32,7 @@ To setup the device it will open an Access Point named "Zirkulationspumpe" to pr
     * "ww/ht/Tint": system internal temperture
     * "ww/ht/dhw_pump_circulation": pump is running or not
     * "ww/ht/info": system information as text
-3. MQTT configuration for heater status subscription to block pump if heater is off and additional external pump control
+3. MQTT configuration for heater status subscription to block pump if heater is off and additional external pump control (e.g. ht3/hometop/ht/dhw_pump_circulation to use the heaters pump messages from hometop_HT3)
 4. NTP configuration to get the RTC infos for logging
 5. Temperature configuration to map the DS18B20 sensors detected
 6. Return Temperature that the pump can switch off when the water is gone through the whole circulation pipe.

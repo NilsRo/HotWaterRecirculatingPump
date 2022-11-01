@@ -79,7 +79,7 @@ char mqttUser[STRING_LEN];
 char mqttPassword[STRING_LEN];
 char mqttHeaterStatusTopic[STRING_LEN];
 char mqttHeaterStatusValue[STRING_LEN];
-char heaterStatus[STRING_LEN];
+bool mqttHeaterStatus = true;
 char mqttPumpTopic[STRING_LEN];
 char mqttPumpValue[STRING_LEN];
 bool mqttPump = false;
@@ -176,22 +176,22 @@ void handleRoot()
   s += String(tempStr) + "</li>";
   s += "</ul><h3>Sensors</h3><ul>";
   s += "<li>Sensor Out: ";
-  s += tempOutParam.value();
+  s += tempOutParam.value() + 1;
   dtostrf(tempOut, 2, 2, tempStr);
   s += " / " + String(tempStr) + "&#8451;";
   s += "<li>Sensor Return: ";
-  s += tempRetParam.value();
+  s += tempRetParam.value() + 1;
   dtostrf(tempRet, 2, 2, tempStr);
   s += " / " + String(tempStr) + "&#8451;";
   s += "<li>Sensor Internal: ";
-  s += tempIntParam.value();
+  s += tempIntParam.value() + 1;
   dtostrf(tempInt, 2, 2, tempStr);
   s += " / " + String(tempStr) + "&#8451;";
   s += "<li>Return Temperature Difference (Off Trigger): ";
   s += tempRetDiffParam.value();
   s += "&#8451;</li>";
   s += "<li>Pump: ";
-  if (strcmp(heaterStatus, mqttHeaterStatusValue) == 0)
+  if (mqttHeaterStatus)
   {
     if (pumpRunning)
       s += "running";
@@ -273,20 +273,60 @@ void onMqttConnect(bool sessionPresent)
   Serial.print("Session present: ");
   Serial.println(sessionPresent);
   uint16_t packetIdSub;
-  if (mqttHeaterStatusTopic != "") packetIdSub = mqttClient.subscribe(mqttHeaterStatusTopic, 2);
-  if (mqttPumpTopic != "") packetIdSub = mqttClient.subscribe(mqttPumpTopic, 2);
+  if (strlen(mqttHeaterStatusTopic)> 0) 
+  {
+    
+    packetIdSub = mqttClient.subscribe(mqttHeaterStatusTopic, 2);
+    Serial.print("Subscribed to topic: ");
+    Serial.println(String(mqttHeaterStatusTopic) + " - " + String(packetIdSub));
+  }
+  if (strlen(mqttPumpTopic) > 0)
+  {
+    Serial.println(" -" + String(mqttPumpTopic) + "- ");
+    // Serial.println(HEX(mqttPumpTopic));
+    packetIdSub = mqttClient.subscribe(mqttPumpTopic, 2);
+    Serial.print("Subscribed to topic: ");
+    Serial.println(String(mqttPumpTopic) + " - " + String(packetIdSub));    
+  }
   digitalWrite(LED_BUILTIN, HIGH);
 }
 
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason)
 {
-  Serial.println("Disconnected from MQTT.");
+String text; 
+  switch(reason) {
+  case AsyncMqttClientDisconnectReason::TCP_DISCONNECTED:
+     text = "TCP_DISCONNECTED"; 
+     break; 
+  case AsyncMqttClientDisconnectReason::MQTT_UNACCEPTABLE_PROTOCOL_VERSION:
+     text = "MQTT_UNACCEPTABLE_PROTOCOL_VERSION"; 
+     break; 
+  case AsyncMqttClientDisconnectReason::MQTT_IDENTIFIER_REJECTED:
+     text = "MQTT_IDENTIFIER_REJECTED";  
+     break;
+  case AsyncMqttClientDisconnectReason::MQTT_SERVER_UNAVAILABLE: 
+     text = "MQTT_SERVER_UNAVAILABLE"; 
+     break;
+  case AsyncMqttClientDisconnectReason::MQTT_MALFORMED_CREDENTIALS:
+     text = "MQTT_MALFORMED_CREDENTIALS"; 
+     break;
+  case AsyncMqttClientDisconnectReason::MQTT_NOT_AUTHORIZED:
+     text = "MQTT_NOT_AUTHORIZED"; 
+     break;
+  
+  }
+  Serial.printf(" [%8u] Disconnected from the broker reason = %s\n", millis(), text.c_str() );
+  Serial.printf(" [%8u] Reconnecting to MQTT..\n", millis());
   digitalWrite(LED_BUILTIN, LOW);
 
   if (WiFi.isConnected())
   {
-    mqttReconnectTimer.once(2, connectToMqtt);
+    mqttReconnectTimer.once(5, connectToMqtt);
   }
+}
+
+void onMqttSubscribe(uint16_t packetId, uint8_t qos) {
+  Serial.printf(" [%8u] Subscribe acknowledged id: %u, qos: %u\n", millis() ,packetId, qos);
 }
 
 void onMqttPublish(uint16_t packetId)
@@ -317,17 +357,17 @@ void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties 
   char new_payload[len+1];
   strncpy(new_payload, payload, len);
   new_payload[len] = '\0';  
-  if (topic == mqttPumpTopic)
+  if (strcmp(topic, mqttPumpTopic) == 0)
   {
     Serial.print("mqtt pump: ");
     Serial.println(new_payload);
     mqttPump = (mqttPumpValue == new_payload);
   }
-  else if (topic == mqttHeaterStatusTopic)
+  else if (strcmp(topic, mqttHeaterStatusTopic) == 0)
   {
     Serial.print("mqtt heater status: ");
     Serial.println(new_payload);
-    strncpy(heaterStatus, new_payload, sizeof(heaterStatus));
+    mqttHeaterStatus = strncpy(mqttHeaterStatusValue, new_payload, sizeof(mqttHeaterStatusValue));
   }
 }
 //-- END SECTION: connection handling
@@ -363,12 +403,12 @@ void getTemp()
   tempOut = sensors.getTempC(sensorOut_id);
   tempRet = sensors.getTempC(sensorRet_id);
   tempInt = sensors.getTempC(sensorInt_id);
-  Serial.print(" Temp Out: ");
-  Serial.println(tempOut);
-  Serial.print(" Temp In: ");
-  Serial.println(tempRet);
-  Serial.print(" Temp Int: ");
-  Serial.println(tempInt);
+  // Serial.print(" Temp Out: ");
+  // Serial.println(tempOut);
+  // Serial.print(" Temp In: ");
+  // Serial.println(tempRet);
+  // Serial.print(" Temp Int: ");
+  // Serial.println(tempInt);
 }
 
 void mqttSendtemp()
@@ -831,7 +871,7 @@ void check()
       if (!pumpRunning)
       {
         temperatur_delta = t[checkCnt] - t[cnt_alt]; // Difference to 5 sec before
-        if ((temperatur_delta >= 0.12 || mqttPump) && (300000 < millis() - pumpBlock || pumpFirstCall) && (strcmp(heaterStatus, mqttHeaterStatusValue) == 0 || !mqttClient.connected()))
+        if ((temperatur_delta >= 0.12 || mqttPump) && (300000 < millis() - pumpBlock || pumpFirstCall) && (mqttHeaterStatus || !mqttClient.connected()))
         { // smallest temp change is 0,12°C,
           Serial.print("Temperature Delta: ");
           Serial.println(temperatur_delta);
@@ -940,6 +980,7 @@ void setup()
   mqttClient.onDisconnect(onMqttDisconnect);
   mqttClient.onPublish(onMqttPublish);
   mqttClient.onMessage(onMqttMessage);
+  mqttClient.onSubscribe(onMqttSubscribe);
 
   if (mqttUser != "")
     mqttClient.setCredentials(mqttUser, mqttPassword);
@@ -1035,7 +1076,6 @@ void loop()
   if ((500 < now - pumpLastRunsChange) && (displayPinState != digitalRead(DISPLAYPIN)))
   {
     displayPinState = 1 - displayPinState; // invert pin state as it is changed
-    pumpLastRunsChange = now;
     if (displayPinState) // button pressed action - set pressed time
     {
       // button released
@@ -1094,7 +1134,7 @@ void loop()
       Serial.println("Button pressed");
     }
   }
-  if (600000 < now - pumpLastRunsChange)
+  if (600000 < now - timePressed)
   { // switch display off after 10mins
     display.displayOff();
     displayTimer.detach();
