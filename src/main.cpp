@@ -107,7 +107,7 @@ int networksPage = 0;
 unsigned int networksPageTotal = 0;
 unsigned long displayPageSubChange = 0;
 
-#define CONFIG_VERSION "2"
+#define CONFIG_VERSION "4"
 int iotWebConfPinState = HIGH;
 unsigned long iotWebConfPinChanged = 0;
 DNSServer dnsServer;
@@ -378,7 +378,7 @@ void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties 
   {
     Serial.print("mqtt heater status: ");
     Serial.println(new_payload);
-    mqttHeaterStatus = strncpy(mqttHeaterStatusValue, new_payload, sizeof(mqttHeaterStatusValue));
+    mqttHeaterStatus = (mqttHeaterStatusValue == new_payload);
   }
 }
 //-- END SECTION: connection handling
@@ -974,14 +974,16 @@ void setup()
   iotWebConf.setFormValidator(&formValidator);
   iotWebConf.setWifiConnectionCallback(&onWifiConnected);
   iotWebConf.setConfigPin(WIFICONFIGPIN);
-  iotWebConf.init();
-  // -- Set up required URL handlers on the web server.
+
   bool validConfig = iotWebConf.init();
   if (!validConfig)
   {
-    mqttServer[0] = '\0';
-    mqttUser[0] = '\0';
-    mqttPassword[0] = '\0';
+    //TODO: diese 3 Werte in einer separaten Stelle im EEPROM abspeichern.
+    // strncpy(iotWebConf.getApPasswordParameter()->valueBuffer, "---", iotWebConf.getApPasswordParameter()->getLength());
+    // strncpy(iotWebConf.getWifiSsidParameter()->valueBuffer, "---", iotWebConf.getWifiSsidParameter()->getLength());
+    // strncpy(iotWebConf.getWifiPasswordParameter()->valueBuffer, "---", iotWebConf.getWifiPasswordParameter()->getLength());
+    // iotWebConf.saveConfig();
+    // needReset = true;
   }
 
   // -- Set up required URL handlers on the web server.
