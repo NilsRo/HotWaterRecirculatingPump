@@ -366,19 +366,19 @@ void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties 
   {
     Serial.print("mqtt pump: ");
     Serial.println(new_payload);
-    mqttPump = (mqttPumpValue == new_payload);
+    mqttPump = (strcmp(mqttPumpValue, new_payload) == 0);
   }
   else if (strcmp(topic, mqttThermalDesinfectionTopic) == 0)
   {
     Serial.print("mqtt thermal desinfection: ");
     Serial.println(new_payload);
-    mqttPump = (mqttThermalDesinfectionValue == new_payload);
+    mqttPump = (strcmp(mqttThermalDesinfectionValue, new_payload) == 0);
   }
   else if (strcmp(topic, mqttHeaterStatusTopic) == 0)
   {
     Serial.print("mqtt heater status: ");
     Serial.println(new_payload);
-    mqttHeaterStatus = (mqttHeaterStatusValue == new_payload);
+    mqttHeaterStatus = (strcmp(mqttHeaterStatusValue, new_payload) == 0);
   }
 }
 //-- END SECTION: connection handling
