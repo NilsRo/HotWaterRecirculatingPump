@@ -387,8 +387,7 @@ void checkSensors()
 {
   if (sensorDetectionError)
   {
-    if (mqttClient.connected())
-      mqttClient.publish(MQTT_PUB_INFO, 0, true, "Sensorfehler");
+    mqttClient.publish(MQTT_PUB_INFO, 0, true, "Sensorfehler");
     sensorError = true;
   }
   else
@@ -403,8 +402,7 @@ void checkSensors()
     }
     else
     {
-      if (mqttClient.connected())
-        mqttClient.publish(MQTT_PUB_INFO, 0, true, "Sensorfehler");
+      mqttClient.publish(MQTT_PUB_INFO, 0, true, "Sensorfehler");
       sensorError = true;
     }
   }
@@ -427,15 +425,12 @@ void getTemp()
 void mqttSendtemp()
 {
   char msg_out[20];
-  if (mqttClient.connected())
-  {
-    dtostrf(tempOut, 2, 2, msg_out);
-    mqttClient.publish(MQTT_PUB_TEMP_OUT, 0, true, msg_out);
-    dtostrf(tempRet, 2, 2, msg_out);
-    mqttClient.publish(MQTT_PUB_TEMP_RET, 0, true, msg_out);
-    dtostrf(tempInt, 2, 2, msg_out);
-    mqttClient.publish(MQTT_PUB_TEMP_INT, 0, true, msg_out);
-  }
+  dtostrf(tempOut, 2, 2, msg_out);
+  mqttClient.publish(MQTT_PUB_TEMP_OUT, 0, true, msg_out);
+  dtostrf(tempRet, 2, 2, msg_out);
+  mqttClient.publish(MQTT_PUB_TEMP_RET, 0, true, msg_out);
+  dtostrf(tempInt, 2, 2, msg_out);
+  mqttClient.publish(MQTT_PUB_TEMP_INT, 0, true, msg_out);
 }
 
 void printAddress(DeviceAddress deviceAddress)
@@ -489,8 +484,7 @@ void publishUptime()
   uptime::calculateUptime();
   sprintf(msg_out, "%03u Tage %02u:%02u:%02u", uptime::getDays(), uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
   // Serial.println(msg_out);
-  if (mqttClient.connected())
-    mqttClient.publish(MQTT_PUB_INFO, 0, true, msg_out);
+  mqttClient.publish(MQTT_PUB_INFO, 0, true, msg_out);
 }
 
 void updateDisplay()
@@ -824,8 +818,7 @@ void pumpOn()
 {
   char tempStr[128];
   Serial.println("Turn on circulation");
-  if (mqttClient.connected())
-    mqttClient.publish(MQTT_PUB_PUMP, 0, true, "1");
+  mqttClient.publish(MQTT_PUB_PUMP, 2, true, "1");
   pumpRunning = true;
   pumpStartedAt = millis();
   digitalWrite(PUMPPIN, LOW);
@@ -843,8 +836,7 @@ void pumpOn()
 void pumpOff()
 {
   Serial.println("Turn off circulation");
-  if (mqttClient.connected())
-    mqttClient.publish(MQTT_PUB_PUMP, 0, true, "0");
+  mqttClient.publish(MQTT_PUB_PUMP, 2, true, "0");
   pumpRunning = false;
   pump[pumpCnt] += " (" + String((int)round((millis() - pumpStartedAt) / 1000 / 60)) + " min.)";
   digitalWrite(PUMPPIN, HIGH);
