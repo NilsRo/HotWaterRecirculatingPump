@@ -871,14 +871,13 @@ void check()
     if (!pumpManual)
     {
       float temperatur_delta = 0.0;
-      bool tempRetBlock = tempRet > (tempOut - tempRetDiffParam.value());
       if (++checkCnt >= 5)
         checkCnt = 0; // Reset counter
       t[checkCnt] = tempOut;
       int cnt_alt = (checkCnt + 6) % 5;
+      temperatur_delta = t[checkCnt] - t[cnt_alt]; // Difference to 5 sec before
       if (!pumpRunning)
       {
-        temperatur_delta = t[checkCnt] - t[cnt_alt]; // Difference to 5 sec before
         if ((temperatur_delta >= 0.12 || mqttPump) && (300000 < millis() - pumpBlock || pumpFirstCall) && (mqttHeaterStatus || !mqttClient.connected()))
         { // smallest temp change is 0,12°C,
           Serial.print("Temperature Delta: ");
@@ -894,8 +893,8 @@ void check()
           disinfection24hTimer.attach(86400, disinfection);
         }
       }
-      else if (tempRetBlock && 120000 < (millis() - pumpStartedAt))
-      { // if return flow temp near temp out stop pump with a delay of 2 minutes
+      else if (tempRet > (tempOut - tempRetDiffParam.value()) && !(temperatur_delta >= 0.12) && 120000 < (millis() - pumpStartedAt))
+      { // if return flow temp near temp out stop pump with a delay of 2 minutes and other rules
         pumpOff();
       }
     }
