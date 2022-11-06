@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <Preferences.h>
 #include <WiFi.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
@@ -108,6 +109,7 @@ unsigned int networksPageTotal = 0;
 unsigned long displayPageSubChange = 0;
 
 #define CONFIG_VERSION "4"
+Preferences preferences;
 int iotWebConfPinState = HIGH;
 unsigned long iotWebConfPinChanged = 0;
 DNSServer dnsServer;
@@ -116,8 +118,6 @@ HTTPUpdateServer httpUpdater;
 static const char chooserValues[][STRING_LEN] = {"0", "1", "2"};
 static const char chooserNames[][STRING_LEN] = {"Sensor 1", "Sensor 2", "Sensor 3"};
 IotWebConf iotWebConf("Zirkulationspumpe", &dnsServer, &server, "", CONFIG_VERSION);
-IotWebConfParameterGroup networkGroup = IotWebConfParameterGroup("network", "Network configuration");
-IotWebConfTextParameter hostnameParam = IotWebConfTextParameter("Hostname", "hostname", hostname, STRING_LEN, "Zirkulationspumpe");
 IotWebConfParameterGroup mqttGroup = IotWebConfParameterGroup("mqtt", "MQTT configuration");
 IotWebConfTextParameter mqttServerParam = IotWebConfTextParameter("MQTT server", "mqttServer", mqttServer, STRING_LEN);
 IotWebConfTextParameter mqttUserNameParam = IotWebConfTextParameter("MQTT user", "mqttUser", mqttUser, STRING_LEN);
@@ -221,8 +221,12 @@ void handleRoot()
 
 void configSaved()
 {
+  preferences.putString("apPassword", String(iotWebConf.getApPasswordParameter()->valueBuffer));
+  preferences.putString("wifiSsid", String(iotWebConf.getWifiAuthInfo().ssid));
+  preferences.putString("wifiPassword", String(iotWebConf.getWifiAuthInfo().password));
+
   Serial.println("Configuration saved.");
-  // TODO: Neustart bei normalen Parametern vermeiden
+  // TODO: Neustart bei normalen Parametern vermeiden  
   needReset = true;
 }
 
@@ -231,12 +235,12 @@ bool formValidator(iotwebconf::WebRequestWrapper *webRequestWrapper)
   Serial.println("Validating form.");
   bool valid = true;
 
-  int l = webRequestWrapper->arg(mqttServerParam.getId()).length();
-  if (l < 3)
-  {
-    mqttServerParam.errorMessage = "Please enter at least 3 chars!";
-    valid = false;
-  }
+  // int l = webRequestWrapper->arg(mqttServerParam.getId()).length();
+  // if (l < 3)
+  // {
+  //   mqttServerParam.errorMessage = "Please enter at least 3 chars!";
+  //   valid = false;
+  // }
 
   return valid;
 }
@@ -934,14 +938,17 @@ void setup()
   WiFi.onEvent(onWifiDisconnect, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   WiFi.setTxPower(WIFI_POWER_19_5dBm);
 
+  if (!preferences.begin("wifi"))
+  {
+    Serial.println("Error opening NVS-Namespace");
+    for (;;);  // leere Dauerschleife -> Ende
+  }    
   iotWebConf.setupUpdateServer(
       [](const char *updatePath)
       { httpUpdater.setup(&server, updatePath); },
       [](const char *userName, char *password)
       { httpUpdater.updateCredentials(userName, password); });
 
-  networkGroup.addItem(&hostnameParam);
-  iotWebConf.addParameterGroup(&networkGroup);
   mqttGroup.addItem(&mqttServerParam);
   mqttGroup.addItem(&mqttUserNameParam);
   mqttGroup.addItem(&mqttUserPasswordParam);
@@ -964,17 +971,27 @@ void setup()
   iotWebConf.setConfigSavedCallback(&configSaved);
   iotWebConf.setFormValidator(&formValidator);
   iotWebConf.setWifiConnectionCallback(&onWifiConnected);
-  iotWebConf.setConfigPin(WIFICONFIGPIN);
+  iotWebConf.setConfigPin(WIFICONFIGPIN);  
 
   bool validConfig = iotWebConf.init();
   if (!validConfig)
   {
-    //TODO: diese 3 Werte in einer separaten Stelle im EEPROM abspeichern.
-    // strncpy(iotWebConf.getApPasswordParameter()->valueBuffer, "---", iotWebConf.getApPasswordParameter()->getLength());
-    // strncpy(iotWebConf.getWifiSsidParameter()->valueBuffer, "---", iotWebConf.getWifiSsidParameter()->getLength());
-    // strncpy(iotWebConf.getWifiPasswordParameter()->valueBuffer, "---", iotWebConf.getWifiPasswordParameter()->getLength());
-    // iotWebConf.saveConfig();
-    // needReset = true;
+    Serial.println("Invalid config detected - restoring WiFi settings...");
+    // much better handling than iotWebConf library to avoid lost wifi on configuration change    
+    if (preferences.isKey("apPassword"))
+      strncpy(iotWebConf.getApPasswordParameter()->valueBuffer, preferences.getString("apPassword").c_str(), iotWebConf.getApPasswordParameter()->getLength());
+    else
+      String("AP Password not found for restauration.")
+    if (preferences.isKey("wifiSsid")) 
+      strncpy(iotWebConf.getWifiSsidParameter()->valueBuffer, preferences.getString("wifiSsid").c_str(), iotWebConf.getWifiSsidParameter()->getLength());
+    else
+      String("WiFi SSID not found for restauration.");
+    if (preferences.isKey("wifiPassword")) 
+      strncpy(iotWebConf.getWifiPasswordParameter()->valueBuffer, preferences.getString("wifiPassword").c_str(), iotWebConf.getWifiPasswordParameter()->getLength());
+    else
+      String("WiFi Password not found for restauration.");
+    iotWebConf.saveConfig();
+    iotWebConf.resetWifiAuthInfo();
   }
 
   // -- Set up required URL handlers on the web server.
