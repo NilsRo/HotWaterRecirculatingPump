@@ -1,53 +1,53 @@
 # HotWaterRecirculatingPump
+Automation of hot water recirculating pumps via ESP32
 
-Automation of hot water recirculating pump via ESP32
-
-The project (actually with german LCD GUI) follows the ideas of https://github.com/MakeMagazinDE/Zirkulationspumpensteuerung and http://www.kabza.de/MyHome/CircPump/CirculationPump.php to control the hot water recirculation pump (Warmwasserzirkulationspumpe) via two temperature sensors comparing the warm water out and return temperature.
+The project (OLED actually in german language only) follows the ideas of https://github.com/MakeMagazinDE/Zirkulationspumpensteuerung and http://www.kabza.de/MyHome/CircPump/CirculationPump.php to control the hot water recirculation pump (Warmwasserzirkulationspumpe) via two temperature sensors comparing the warm water flow and return temperature. This saves electricity and thermal energy as the circulation will by done by request and not countinuously.
 
 ![diagram](docs/diagram.drawio.png)
 
-Featurelist
+In the HT3 warm water diagram you see the period without warm water taking is flattend so the heater does heatup fewer.
 
-* Control the pump via out and return temperature sensor
+![warm water log](img/HT3_Warmwasser.png)
+
+## Featurelist
+* Managing the pump via flow and return temperature sensor
 * MQTT publishing to get logging information
 * MQTT subscription to get heater information and heater pump trigger like provided by https://github.com/norberts1/hometop_HT3
-* Realtime Clock support to maintain sleep ciycles and also cleaning everything every 24h
-* 2 relay support to add e.g. a magnetic vent
-* SSD1306 support to view status information
-* AP Setup support to avoid storing password, etc. hardcoded
+* Realtime Clock to maintain sleep ciycles and also cleaning everything every 24h
+* 2 channel rela to add e.g. a magnetic vent later
+* SSD1306 OLED to view status information
+* Guided setup to avoid storing password, etc. hardcoded
 
-[Hardware](docs/schema.pdf)
-
+## [Hardware](docs/schema.pdf)
 * Wemos D1 Mini ESP32
 * Standard Arduino/Raspberry 2-Channel Relay with Optokoppler
-* see [BOM](docs/HotWaterRecirculatingPump.csv)
-* STL for the [case](docs/Warmwasserpumpe.stl) and [cover](docs/Warmwasserpumpe(2).stl)
+* [BOM](docs/HotWaterRecirculatingPump.csv)
+* STL for [case](docs/Warmwasserpumpe.stl) and [cover](docs/Warmwasserpumpe(2).stl)
 
 ![Case](img/SpaceClaim_2022-10-28%20163143.png)
 ![Open Case](img/SpaceClaim_2022-10-28%20163208.png)
 ![Case with components mounted](img/Case%20with%20components.JPG)
 
 # Software
+To setup the device it will open an Access Point named "Zirkulationspumpe" to provide a configuration interface. It is still available after the device is connected to an WiFi Network so you can do the 1-Wire configuration later. You have to mount the sensor 50cm from the hot water reserviour in the flow and near the end of the return. 
 
-To setup the device it will open an Access Point named "Zirkulationspumpe" to provide an configuration interface. It is still available after the device is connected to an WiFi Network so you can do the 1-Wire configuration later. You have to mount the sensor 50cm from the hot water reserviour.
-
-1. system configuration and hostname to get an WiFi connection (everything later can be configured later via the normal network)
-2. MQTT configuration to publish the following topics:
-   * "ww/ht/dhw_Tflow_measured": out temperature of the warm water
-   * "ww/ht/dhw_Treturn": return temperture of the warm water circulation
-   * "ww/ht/Tint": system internal temperture
-   * "ww/ht/dhw_pump_circulation": pump is running or not
-   * "ww/ht/info": system information as text
-3. MQTT configuration for heater status subscription to block pump if heater is off (e.g. ht3/hometop/ht/hc1_Tniveau) and additional external pump control (e.g. ht3/hometop/ht/dhw_pump_circulation to use the heaters pump messages from hometop_HT3)
-4. NTP configuration to get the RTC infos for logging
-5. Temperature configuration to map the DS18B20 sensors detected
-6. Return Temperature that the pump can switch off when the water is gone through the whole circulation pipe.
+1. Do the system configuration and set things name (hostname), AP password (if WiFi connection is lost) and WiFi credentials to get a WiFi connection (everything else can be configured later via the normal network if you like)
+2. MQTT configuration (optional)
+   1. publish the following topics:
+      * "ww/ht/dhw_Tflow_measured": out temperature of the warm water
+      * "ww/ht/dhw_Treturn": return temperture of the warm water circulation
+      * "ww/ht/Tint": system internal temperture
+      * "ww/ht/dhw_pump_circulation": pump is running or not
+      * "ww/ht/info": system information as text
+   2. subscribe for heater topics to block pump if heater is off (e.g. ht3/hometop/ht/hc1_Tniveau) and additional external pump trigger (e.g. ht3/hometop/ht/dhw_pump_circulation) to use the heaters pump messages -not set as default as it will then start the pump more often- from hometop_HT3 or from smart home. The event will be triggered if the message will contain the value given.
+4. NTP configuration to get RTC infos for logging (default is fine for german timezone)
+5. Temperature configuration to map DS18B20 sensors detected
+6. Define your return temperature to switch off when the water is gone through the whole circulation pipe.
 
 ![config page](img/opera_2022-10-31%20213941.png)
 
 ## OLED infos
-
-![Displaypage1](img/Displaypage1.JPG)
+<img src="img/Displaypage1.JPG"  width="30%" height="30%">
 <img src="img/Displaypage2.JPG"  width="30%" height="30%">
 <img src="img/Displaypage3.JPG"  width="30%" height="30%">
 <img src="img/Displaypage4.JPG"  width="30%" height="30%">
@@ -55,11 +55,11 @@ To setup the device it will open an Access Point named "Zirkulationspumpe" to pr
 <img src="img/Displaypage6.JPG"  width="30%" height="30%">
 <img src="img/Displaypage7.JPG"  width="30%" height="30%">
 
+# Tips
+* increase the pumps flow to the maximum that the water will go through the pipes as fast as possible after requested
+* Setup special schedules via a smart home if you like to have warm water on request (e.g. by phone) or at a specific time.
+
+
 # ToDos
-
-* made a better documentation
 * Make OLED language configurable
-
-# Note
-
-This project is still under early development but it is running without issues. But it is actually not clear of the warm water detection will work as expected as there should be some more tests. So feal free to help...
+* second relay is actually unused
