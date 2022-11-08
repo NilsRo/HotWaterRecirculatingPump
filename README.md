@@ -1,5 +1,5 @@
-# HotWaterRecirculatingPump
-Automation of hot water recirculating pumps via ESP32
+# Recirculation pump automated
+How to optimize your water heating with an ESP32.
 
 The project (OLED actually in german language only) follows the ideas of https://github.com/MakeMagazinDE/Zirkulationspumpensteuerung and http://www.kabza.de/MyHome/CircPump/CirculationPump.php to control the hot water recirculation pump (Warmwasserzirkulationspumpe) via two temperature sensors comparing the warm water flow and return temperature. This saves electricity and thermal energy as the circulation will by done by request and not countinuously.
 
@@ -10,28 +10,31 @@ In the HT3 warm water diagram you see the period without warm water taking is fl
 ![warm water log](img/HT3_Warmwasser.png)
 
 ## Featurelist
-* Managing the pump via flow and return temperature sensor
+* Managing the pump via flow and return temperature
 * MQTT publishing to get logging information
-* MQTT subscription to get heater information and heater pump trigger like provided by https://github.com/norberts1/hometop_HT3
-* Realtime Clock to maintain sleep ciycles and also cleaning everything every 24h
-* 2 channel rela to add e.g. a magnetic vent later
+* MQTT subscription for your smart home and to use heater information like provided by https://github.com/norberts1/hometop_HT3
+* Realtime clock for desinfection and logging
 * SSD1306 OLED to view status information
-* Guided setup to avoid storing password, etc. hardcoded
+* Guided setup to avoid storing WiFi password, etc. in the code
+* 2 channel relay to add e.g. a magnetic vent later
 
 ## [Hardware](docs/schema.pdf)
 * Wemos D1 Mini ESP32
-* Standard Arduino/Raspberry 2-Channel Relay with Optokoppler
+* Standard Arduino/Raspberry 2-channel relay with optokoppler
 * [BOM](docs/HotWaterRecirculatingPump.csv)
 * STL for [case](docs/Warmwasserpumpe.stl) and [cover](docs/Warmwasserpumpe(2).stl)
 
 ![Case](img/SpaceClaim_2022-10-28%20163143.png)
-![Open Case](img/SpaceClaim_2022-10-28%20163208.png)
+![Case opened](img/SpaceClaim_2022-10-28%20163208.png)
 ![Case with components mounted](img/Case%20with%20components.JPG)
 
-# Software
-To setup the device it will open an Access Point named "Zirkulationspumpe" to provide a configuration interface. It is still available after the device is connected to an WiFi Network so you can do the 1-Wire configuration later. You have to mount the sensor 50cm from the hot water reserviour in the flow and near the end of the return. 
+## Mounting
+The flow sensor have to be mounted 50cm away from the hot water reserviour. The return sensor near the end of the return pipe but not side by side to the reserviour. 
 
-1. Do the system configuration and set things name (hostname), AP password (if WiFi connection is lost) and WiFi credentials to get a WiFi connection (everything else can be configured later via the normal network if you like)
+# Software
+On first start the thing will open an Access Point named "Zirkulationspumpe" to provide the setup interface. The interface is still available after the device is connected so you can change everything later. 
+
+1. Do the system configuration and set things name (hostname), AP password (if WiFi connection is lost) and WiFi credentials for your network.
 2. MQTT configuration (optional)
    1. publish the following topics:
       * "ww/ht/dhw_Tflow_measured": out temperature of the warm water
@@ -39,7 +42,7 @@ To setup the device it will open an Access Point named "Zirkulationspumpe" to pr
       * "ww/ht/Tint": system internal temperture
       * "ww/ht/dhw_pump_circulation": pump is running or not
       * "ww/ht/info": system information as text
-   2. subscribe for heater topics to block pump if heater is off (e.g. ht3/hometop/ht/hc1_Tniveau) and additional external pump trigger (e.g. ht3/hometop/ht/dhw_pump_circulation) to use the heaters pump messages -not set as default as it will then start the pump more often- from hometop_HT3 or from smart home. The event will be triggered if the message will contain the value given.
+   2. subscribe for heater topics to block pump if heater is off (e.g. ht3/hometop/ht/hc1_Tniveau) and additional external pump trigger (e.g. ht3/hometop/ht/dhw_pump_circulation) to use the heaters pump messages -not set as default as it will then start the pump more often- from hometop_HT3 or something smarter provided by your smart home. The events will be triggered if the message contains the value given.
 4. NTP configuration to get RTC infos for logging (default is fine for german timezone)
 5. Temperature configuration to map DS18B20 sensors detected
 6. Define your return temperature to switch off when the water is gone through the whole circulation pipe.
