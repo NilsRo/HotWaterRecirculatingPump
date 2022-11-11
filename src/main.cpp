@@ -167,6 +167,21 @@ void handleRoot()
   s += "<li>MQTT Server: ";
   s += mqttServer;
   s += "</li>";
+  s += "<li>Heater Status: ";
+  s += mqttHeaterStatusTopic;
+  s +=  ": ";
+  s +=  mqttHeaterStatusValue;
+  s += "</li>";
+  s += "<li>external pump: ";
+  s += mqttPumpTopic;
+  s += ": ";
+  s += mqttPumpValue;
+  s += "</li>";
+  s += "<li>thermal desinfection: ";
+  s += mqttThermalDesinfectionTopic;
+  s += ": ";
+  s += mqttThermalDesinfectionValue;
+  s += "</li>";
   s += "</ul><h3>NTP</h3><ul>";
   s += "<li>NTP Server: ";
   s += ntpServer;
@@ -981,7 +996,7 @@ void setup()
     if (preferences.isKey("apPassword"))
       strncpy(iotWebConf.getApPasswordParameter()->valueBuffer, preferences.getString("apPassword").c_str(), iotWebConf.getApPasswordParameter()->getLength());
     else
-      String("AP Password not found for restauration.")
+      String("AP Password not found for restauration.");
     if (preferences.isKey("wifiSsid")) 
       strncpy(iotWebConf.getWifiSsidParameter()->valueBuffer, preferences.getString("wifiSsid").c_str(), iotWebConf.getWifiSsidParameter()->getLength());
     else
