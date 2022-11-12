@@ -156,59 +156,73 @@ void handleRoot()
   }
   char tempStr[128];
 
-  String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
-  s += "<link rel=\"stylesheet\" href=\"https://unpkg.com/mvp.css@1.12/mvp.css\">";
-  s += "<title>Warmwater Recirculation Pump</title></head><body>";
-  s += "<h3>Network</h3><ul>";
-  s += "<li>Hostname : ";
-  s += hostname;
-  s += "</li>";
-  s += "</ul><h3>MQTT</h3><ul>";
-  s += "<li>MQTT Server: ";
-  s += mqttServer;
-  s += "</li>";
-  s += "<li>Heater Status: ";
-  s += mqttHeaterStatusTopic;
-  s +=  ": ";
-  s +=  mqttHeaterStatusValue;
-  s += "</li>";
-  s += "<li>external pump: ";
-  s += mqttPumpTopic;
-  s += ": ";
-  s += mqttPumpValue;
-  s += "</li>";
-  s += "<li>thermal desinfection: ";
-  s += mqttThermalDesinfectionTopic;
-  s += ": ";
-  s += mqttThermalDesinfectionValue;
-  s += "</li>";
-  s += "</ul><h3>NTP</h3><ul>";
-  s += "<li>NTP Server: ";
-  s += ntpServer;
-  s += "</li>";
-  s += "<li>NTP Timezone: ";
-  s += ntpTimezone;
-  s += "</li>";
-  s += "<li>actual local time: ";
+  String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";  
+  s += iotWebConf.getHtmlFormatProvider()->getStyle();
+  s += "<title>Warmwater Recirculation Pump</title>";
+  s += iotWebConf.getHtmlFormatProvider()->getHeadEnd();
+  s += "<fieldset id=" + String(mqttGroup.getId()) + ">";
+  s += "<legend>" + String(mqttGroup.label) + "</legend>";
+  s += "<table border = \"0\"><tr>";
+  s += "<td>" + String(mqttServerParam.label) + ": </td>";
+  s += "<td>" + String(mqttServer) + "</td>";
+  s += "</tr><tr>";
+  s += "<td>" + String(mqttHeaterStatusTopicParam.label) + ": </td>";
+  s += "<td>" + String(mqttHeaterStatusTopic) + " - " + String(mqttHeaterStatusValue) + "</td>";
+  s += "</tr><tr>";
+  s += "<td>" + String(mqttPumpTopicParam.label) + ": </td>";
+  s += "<td>" + String(mqttPumpTopic) + " - " + String(mqttPumpValue) + "</td>";
+  s += "</tr><tr>";
+  s += "<td>" + String(mqttThermalDesinfectionTopicParam.label) + ": </td>";
+  s += "<td>" + String(mqttThermalDesinfectionTopic) + " - " + String(mqttThermalDesinfectionValue) + "</td>";  
+  s += "</tr></table></fieldset>";
+ 
+  s += "<fieldset id=" + String(ntpGroup.getId()) + ">";
+  s += "<legend>" + String(ntpGroup.label) + "</legend>";
+  s += "<table border = \"0\"><tr>";
+  s += "<td>" + String(ntpServerParam.label) + ": </td>";
+  s += "<td>" + String(ntpServer) + "</td>";
+  s += "</tr><tr>";
+  s += "<td>" + String(ntpTimezoneParam.label) + ": </td>";
+  s += "<td>" + String(ntpTimezone) + "</td>";
+  s += "</tr><tr>";
+  s += "<td>actual local time: </td>";
   strftime(tempStr, 40, "%d.%m.%Y %T", &localTime);
-  s += String(tempStr) + "</li>";
-  s += "</ul><h3>Sensors</h3><ul>";
-  s += "<li>Sensor Out: ";
-  s += tempOutParam.value() + 1;
+  s += "<td>" + String(tempStr) + "</td>";
+  s += "</tr></table></fieldset>";
+
+  s += "<fieldset id=" + String(tempGroup.getId()) + ">";
+  s += "<legend>" + String(tempGroup.label) + "</legend>";
+  s += "<table border = \"0\"><tr>";
+  s += "<td>" + String(tempOutParam.label) + ": </td>";
+  s += "<td>";
+  s += chooserNames[atol(tempOutParam.value())];
   dtostrf(tempOut, 2, 2, tempStr);
   s += " / " + String(tempStr) + "&#8451;";
-  s += "<li>Sensor Return: ";
-  s += tempRetParam.value() + 1;
+  s += "</td>";
+  s += "</tr><tr>";
+  s += "<td>" + String(tempRetParam.label) + ": </td>";
+  s += "<td>";
+  s += chooserNames[atol(tempRetParam.value())];
   dtostrf(tempRet, 2, 2, tempStr);
   s += " / " + String(tempStr) + "&#8451;";
-  s += "<li>Sensor Internal: ";
-  s += tempIntParam.value() + 1;
+  s += "</td>";
+  s += "</tr><tr>";
+  s += "<td>" + String(tempIntParam.label) + ": </td>";
+  s += "<td>";
+  s += chooserNames[atol(tempIntParam.value())];
   dtostrf(tempInt, 2, 2, tempStr);
   s += " / " + String(tempStr) + "&#8451;";
-  s += "<li>Return Temperature Difference (Off Trigger): ";
+  s += "</td>";
+  s += "</tr><tr>";    
+  s += "<td>" + String(tempRetDiffParam.label) + ": </td>";
+  s += "<td>";  
   s += tempRetDiffParam.value();
-  s += "&#8451;</li>";
-  s += "<li>Pump: ";
+  s += "&#8451;</td>";
+  s += "</tr></table></fieldset>";
+
+  s += "<fieldset id=\"status\">";
+  s += "<legend>Status</legend>";
+  s += "<p><h3>Pump</h3>";
   if (mqttHeaterStatus)
   {
     if (pumpRunning)
@@ -218,7 +232,6 @@ void handleRoot()
   }
   else
     s += "heater off";
-  s += "</li></ul>";
   s += "<p><h3>" + String(nils_length(pump)) + " Last pump actions</h3>";
   for (int i = 0; i < nils_length(pump); i++)
   { // display last 5 pumpOn Events in right order
@@ -228,8 +241,10 @@ void handleRoot()
   uptime::calculateUptime();
   sprintf(tempStr, "%03u Tage %02u:%02u:%02u", uptime::getDays(), uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
   s += "<p>Uptime: " + String(tempStr);
+  s += "</fieldset>";
+
   s += "<p>Go to <a href='config'>Configuration</a>";
-  s += "</body></html>\n";
+  s += iotWebConf.getHtmlFormatProvider()->getEnd();
 
   server.send(200, "text/html", s);
 }
