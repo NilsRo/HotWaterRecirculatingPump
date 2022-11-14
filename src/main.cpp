@@ -239,7 +239,7 @@ void handleRoot()
     s += String(i + 1) + ": " + pump[arrIndex] + "<br>";
   }
   uptime::calculateUptime();
-  sprintf(tempStr, "%03u Tage %02u:%02u:%02u", uptime::getDays(), uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
+  sprintf(tempStr, "%04u Tage %02u:%02u:%02u", uptime::getDays(), uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
   s += "<p>Uptime: " + String(tempStr);
   s += "</fieldset>";
 
@@ -516,7 +516,7 @@ void publishUptime()
 {
   char msg_out[20];
   uptime::calculateUptime();
-  sprintf(msg_out, "%03u Tage %02u:%02u:%02u", uptime::getDays(), uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
+  sprintf(msg_out, "%04u Tage %02u:%02u:%02u", uptime::getDays(), uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
   // Serial.println(msg_out);
   mqttClient.publish(MQTT_PUB_INFO, 0, true, msg_out);
 }
