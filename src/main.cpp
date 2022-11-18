@@ -236,7 +236,7 @@ void handleRoot()
   for (int i = 0; i < nils_length(pump); i++)
   { // display last pumpOn Events in right order
     byte arrIndex = mod((((int)pumpCnt) - i), nils_length(pump));
-    dtostrf(i + 1, 2, 0, tempStr);
+    sprintf(tempStr,"%02d", i + 1);
     s += String(tempStr) + ": " + pump[arrIndex] + "<br>";
   }
   uptime::calculateUptime();
