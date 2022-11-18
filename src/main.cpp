@@ -119,25 +119,25 @@ static const char chooserValues[][STRING_LEN] = {"0", "1", "2"};
 static const char chooserNames[][STRING_LEN] = {"Sensor 1", "Sensor 2", "Sensor 3"};
 IotWebConf iotWebConf("Zirkulationspumpe", &dnsServer, &server, "", CONFIG_VERSION);
 IotWebConfParameterGroup mqttGroup = IotWebConfParameterGroup("mqtt", "MQTT configuration");
-IotWebConfTextParameter mqttServerParam = IotWebConfTextParameter("MQTT server", "mqttServer", mqttServer, STRING_LEN);
-IotWebConfTextParameter mqttUserNameParam = IotWebConfTextParameter("MQTT user", "mqttUser", mqttUser, STRING_LEN);
-IotWebConfPasswordParameter mqttUserPasswordParam = IotWebConfPasswordParameter("MQTT password", "mqttPassword", mqttPassword, STRING_LEN);
-IotWebConfTextParameter mqttHeaterStatusTopicParam = IotWebConfTextParameter("MQTT Heater Status Subscription", "mqttHeaterStatusTopic", mqttHeaterStatusTopic, STRING_LEN, "ht3/hometop/ht/hc1_Tniveau");
-IotWebConfTextParameter mqttHeaterStatusValueParam = IotWebConfTextParameter("MQTT Heater Status Value", "mqttHeaterStatusValue", mqttHeaterStatusValue, STRING_LEN, "3");
-IotWebConfTextParameter mqttPumpTopicParam = IotWebConfTextParameter("MQTT external pump start Subscription", "mqttPumpTopic", mqttPumpTopic, STRING_LEN, "");
-IotWebConfTextParameter mqttPumpValueParam = IotWebConfTextParameter("MQTT external pump start Value", "mqttPumpValue", mqttPumpValue, STRING_LEN, "");
-IotWebConfTextParameter mqttThermalDesinfectionTopicParam = IotWebConfTextParameter("MQTT thermal desinfection Subscription", "mqttThermalDesinfectionTopic", mqttThermalDesinfectionTopic, STRING_LEN, "ht3/hometop/ht/dhw_thermal_desinfection");
-IotWebConfTextParameter mqttThermalDesinfectionValueParam = IotWebConfTextParameter("MQTT thermal desinfection Value", "mqttThermalDesinfectionValue", mqttThermalDesinfectionValue, STRING_LEN, "1");
+IotWebConfTextParameter mqttServerParam = IotWebConfTextParameter("server", "mqttServer", mqttServer, STRING_LEN);
+IotWebConfTextParameter mqttUserNameParam = IotWebConfTextParameter("user", "mqttUser", mqttUser, STRING_LEN);
+IotWebConfPasswordParameter mqttUserPasswordParam = IotWebConfPasswordParameter("password", "mqttPassword", mqttPassword, STRING_LEN);
+IotWebConfTextParameter mqttHeaterStatusTopicParam = IotWebConfTextParameter("heater status topic", "mqttHeaterStatusTopic", mqttHeaterStatusTopic, STRING_LEN, "ht3/hometop/ht/hc1_Tniveau");
+IotWebConfTextParameter mqttHeaterStatusValueParam = IotWebConfTextParameter("heater status value", "mqttHeaterStatusValue", mqttHeaterStatusValue, STRING_LEN, "3");
+IotWebConfTextParameter mqttPumpTopicParam = IotWebConfTextParameter("external pump start topic", "mqttPumpTopic", mqttPumpTopic, STRING_LEN, "");
+IotWebConfTextParameter mqttPumpValueParam = IotWebConfTextParameter("external pump start Value", "mqttPumpValue", mqttPumpValue, STRING_LEN, "");
+IotWebConfTextParameter mqttThermalDesinfectionTopicParam = IotWebConfTextParameter("thermal desinfection topic", "mqttThermalDesinfectionTopic", mqttThermalDesinfectionTopic, STRING_LEN, "ht3/hometop/ht/dhw_thermal_desinfection");
+IotWebConfTextParameter mqttThermalDesinfectionValueParam = IotWebConfTextParameter("thermal desinfection Value", "mqttThermalDesinfectionValue", mqttThermalDesinfectionValue, STRING_LEN, "1");
 IotWebConfParameterGroup ntpGroup = IotWebConfParameterGroup("ntp", "NTP configuration");
-IotWebConfTextParameter ntpServerParam = IotWebConfTextParameter("NTP Server", "ntpServer", ntpServer, STRING_LEN, "de.pool.ntp.org");
-IotWebConfTextParameter ntpTimezoneParam = IotWebConfTextParameter("NTP timezone", "ntpTimezone", ntpTimezone, STRING_LEN, "CET-1CEST,M3.5.0/02,M10.5.0/03");
+IotWebConfTextParameter ntpServerParam = IotWebConfTextParameter("server", "ntpServer", ntpServer, STRING_LEN, "de.pool.ntp.org");
+IotWebConfTextParameter ntpTimezoneParam = IotWebConfTextParameter("timezone", "ntpTimezone", ntpTimezone, STRING_LEN, "CET-1CEST,M3.5.0/02,M10.5.0/03");
 IotWebConfParameterGroup tempGroup = IotWebConfParameterGroup("temp", "Temperature configuration");
 iotwebconf::SelectTParameter<STRING_LEN> tempOutParam =
-    iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempOutParam").label("Sensor Out").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("1").build();
+    iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempOutParam").label("Out").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("1").build();
 iotwebconf::SelectTParameter<STRING_LEN> tempRetParam =
-    iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempRetParam").label("Sensor Return").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("2").build();
+    iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempRetParam").label("Return").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("2").build();
 iotwebconf::SelectTParameter<STRING_LEN> tempIntParam =
-    iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempIntParam").label("Sensor Internal").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("3").build();
+    iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempIntParam").label("Internal").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("3").build();
 iotwebconf::FloatTParameter tempRetDiffParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("tempRetDiffParam").label("Return Off Diff").defaultValue(10.0).step(0.5).placeholder("e.g. 23.4").build();
 
 int mod(int x, int y)
@@ -234,9 +234,10 @@ void handleRoot()
     s += "heater off";
   s += "<p><h3>" + String(nils_length(pump)) + " Last pump actions</h3>";
   for (int i = 0; i < nils_length(pump); i++)
-  { // display last 5 pumpOn Events in right order
+  { // display last pumpOn Events in right order
     byte arrIndex = mod((((int)pumpCnt) - i), nils_length(pump));
-    s += String(i + 1) + ": " + pump[arrIndex] + "<br>";
+    dtostrf(i + 1, 2, 0, tempStr);
+    s += String(tempStr) + ": " + pump[arrIndex] + "<br>";
   }
   uptime::calculateUptime();
   sprintf(tempStr, "%04u Tage %02u:%02u:%02u", uptime::getDays(), uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
