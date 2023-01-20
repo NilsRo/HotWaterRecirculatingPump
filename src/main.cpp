@@ -139,6 +139,8 @@ iotwebconf::SelectTParameter<STRING_LEN> tempRetParam =
 iotwebconf::SelectTParameter<STRING_LEN> tempIntParam =
     iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempIntParam").label("Internal").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("3").build();
 iotwebconf::FloatTParameter tempRetDiffParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("tempRetDiffParam").label("Return Off Diff").defaultValue(10.0).step(0.5).placeholder("e.g. 23.4").build();
+iotwebconf::FloatTParameter tempTriggerParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("tempTriggerParam").label("Temperature Trigger").defaultValue(0.125).step(0.0625).placeholder("e.g. 0.12").build();
+
 
 int mod(int x, int y)
 {
@@ -888,7 +890,7 @@ void check()
 
   if (sensorError)
   {
-    // Emergeny Mode if missing sensors
+    // Emergency Mode if missing sensors
     if ((localTime.tm_hour >= 6 && localTime.tm_hour < 23) && (localTime.tm_min >= 00 && localTime.tm_min < 10))
     {
       if (!pumpRunning)
@@ -913,7 +915,7 @@ void check()
       temperatur_delta = t[checkCnt] - t[cnt_alt]; // Difference to 5 sec before
       if (!pumpRunning)
       {
-        if ((temperatur_delta >= 0.12 || mqttPump) && (300000 < millis() - pumpBlock || pumpFirstCall) && (mqttHeaterStatus || !mqttClient.connected()))
+        if ((temperatur_delta >= tempTriggerParam.value() || mqttPump) && (300000 < millis() - pumpBlock || pumpFirstCall) && (mqttHeaterStatus || !mqttClient.connected()))
         { // smallest temp change is 0,12°C,
           Serial.print("Temperature Delta: ");
           Serial.println(temperatur_delta);
@@ -928,7 +930,7 @@ void check()
           disinfection24hTimer.attach(86400, disinfection);
         }
       }
-      else if (tempRet > (tempOut - tempRetDiffParam.value()) && !(temperatur_delta >= 0.12) && 120000 < (millis() - pumpStartedAt))
+      else if (tempRet > (tempOut - tempRetDiffParam.value()) && !(temperatur_delta >= tempTriggerParam.value()) && 120000 < (millis() - pumpStartedAt))
       { // if return flow temp near temp out stop pump with a delay of 2 minutes and other rules
         pumpOff();
       }
@@ -997,6 +999,7 @@ void setup()
   tempGroup.addItem(&tempRetParam);
   tempGroup.addItem(&tempIntParam);
   tempGroup.addItem(&tempRetDiffParam);
+  tempGroup.addItem(&tempTriggerParam);
   iotWebConf.addParameterGroup(&tempGroup);
 
   iotWebConf.setConfigSavedCallback(&configSaved);
