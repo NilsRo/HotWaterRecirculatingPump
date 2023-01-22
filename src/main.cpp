@@ -88,7 +88,6 @@ char mqttThermalDesinfectionTopic[STRING_LEN];
 char mqttThermalDesinfectionValue[STRING_LEN];
 
 Ticker mqttReconnectTimer;
-Ticker disinfection24hTimer;
 Ticker secTimer;
 Ticker displayTimer;
 Ticker sec10Timer;
@@ -880,11 +879,6 @@ void pumpOff()
   // digitalWrite(VALVEPIN, LOW);
 }
 
-void disinfection()
-{
-  pumpOn();
-}
-
 void check()
 {
 
@@ -915,7 +909,7 @@ void check()
       temperatur_delta = t[checkCnt] - t[cnt_alt]; // Difference to 5 sec before
       if (!pumpRunning)
       {
-        if ((temperatur_delta >= tempTriggerParam.value() || mqttPump) && (300000 < millis() - pumpBlock || pumpFirstCall) && (mqttHeaterStatus || !mqttClient.connected()))
+        if (((temperatur_delta >= tempTriggerParam.value() || mqttPump) && (300000 < millis() - pumpBlock || pumpFirstCall) && (mqttHeaterStatus || !mqttClient.connected())) || 86400000 < millis() - pumpStartedAt)
         { // smallest temp change is 0,12°C,
           Serial.print("Temperature Delta: ");
           Serial.println(temperatur_delta);
@@ -927,7 +921,6 @@ void check()
           pumpBlock = millis();
           pumpFirstCall = false;
           pumpOn();
-          disinfection24hTimer.attach(86400, disinfection);
         }
       }
       else if (tempRet > (tempOut - tempRetDiffParam.value()) && !(temperatur_delta >= tempTriggerParam.value()) && 120000 < (millis() - pumpStartedAt))
@@ -1102,7 +1095,6 @@ void setup()
   Serial.println(WiFi.localIP());
 
   // Timers
-  disinfection24hTimer.attach(86400, disinfection);
   secTimer.attach(1, onSecTimer);
   sec10Timer.attach(10, onSec10Timer);
   displayTimer.attach_ms(500, updateDisplay);
