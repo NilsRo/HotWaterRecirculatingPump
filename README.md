@@ -1,7 +1,7 @@
 # Recirculation pump automated
 How to optimize your water heating with an ESP32.
 
-The project (OLED actually in german language only) follows the ideas of https://github.com/MakeMagazinDE/Zirkulationspumpensteuerung and http://www.kabza.de/MyHome/CircPump/CirculationPump.php to control the hot water recirculation pump (Warmwasserzirkulationspumpe) via two temperature sensors comparing the warm water flow and return temperature. This saves electricity and thermal energy as the circulation will by done by request and not countinuously.
+The project (OLED actually in german language only) follows the ideas of https://github.com/MakeMagazinDE/Zirkulationspumpensteuerung and http://www.kabza.de/MyHome/CircPump/CirculationPump.php to control the hot water recirculation pump (Warmwasserzirkulationspumpe) via two temperature sensors comparing the warm water flow and return temperature. This saves electricity and thermal energy as the circulation will by done on request and not countinuously.
 
 ![diagram](docs/diagram.drawio.png)
 
@@ -42,7 +42,7 @@ On first start the thing will open an Access Point named "Zirkulationspumpe" to 
       * "ww/ht/Tint": system internal temperture
       * "ww/ht/dhw_pump_circulation": pump is running or not
       * "ww/ht/info": system information as text
-   2. subscribe for heater topics to block pump if heater is off (e.g. ht3/hometop/ht/hc1_Tniveau) and additional external pump trigger (e.g. ht3/hometop/ht/dhw_pump_circulation) to use the heaters pump messages -not set as default as it will then start the pump more often- from hometop_HT3 or something smarter provided by your smart home. The events will be triggered if the message contains the value given.
+   2. subscribe for heater topics to block pump if heater is off (e.g. ht3/hometop/ht/hc1_Tniveau) and additional external pump trigger (e.g. ht3/hometop/ht/dhw_pump_circulation) to use the heaters pump messages -not set as default as it will then start the pump more often- from hometop_HT3 or something smarter provided by your smart home. The events will be triggered if the message contains the value set in the configuration.
 4. NTP configuration to get RTC infos for logging (default is fine for german timezone)
 5. Temperature configuration to map DS18B20 sensors detected
 6. Define your return temperature to switch off when the water is gone through the whole circulation pipe.
@@ -59,10 +59,10 @@ On first start the thing will open an Access Point named "Zirkulationspumpe" to 
 <img src="img/Displaypage7.JPG"  width="30%" height="30%">
 
 # Tips
-* increase the pumps flow to the maximum that the water will go through the pipes as fast as possible after requested
+* Increase the pumps flow to the maximum that the water goes through the pipes as fast as possible.
 * Setup special schedules via a smart home if you like to have warm water on request (e.g. by phone) or at a specific time.
 
 
 # ToDos
 * Make OLED language configurable
-* second relay is actually unused
+* second relay channel is actually unused
