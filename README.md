@@ -1,7 +1,7 @@
 # Recirculation pump automated
 How to optimize your water heating with an ESP32.
 
-The project (OLED actually in german language only) follows the ideas of https://github.com/MakeMagazinDE/Zirkulationspumpensteuerung and http://www.kabza.de/MyHome/CircPump/CirculationPump.php to control the hot water recirculation pump (Warmwasserzirkulationspumpe) via two temperature sensors comparing the warm water flow and return temperature. This saves electricity and thermal energy as the circulation will by done on request and not countinuously.
+The project follows the ideas of https://github.com/MakeMagazinDE/Zirkulationspumpensteuerung and http://www.kabza.de/MyHome/CircPump/CirculationPump.php to control the hot water recirculation pump (Warmwasserzirkulationspumpe) via two temperature sensors comparing the warm water flow and return temperature. This saves electricity and thermal energy as the circulation will by done on request and not countinuously.
 
 ![diagram](docs/diagram.drawio.png)
 
@@ -61,8 +61,4 @@ On first start the thing will open an Access Point named "Zirkulationspumpe" to 
 # Tips
 * Increase the pumps flow to the maximum that the water goes through the pipes as fast as possible.
 * Setup special schedules via a smart home if you like to have warm water on request (e.g. by phone) or at a specific time.
-
-
-# ToDos
-* Make OLED language configurable
-* second relay channel is actually unused
+* second relay channel is actually unused - suggest how to use it if you need
