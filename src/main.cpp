@@ -17,6 +17,7 @@
 #include <time.h>
 #include <uptime.h>
 #include <algorithm>
+#include <langu.h>
 
 #define STRING_LEN 128
 #define nils_length(x) ((sizeof(x) / sizeof(0 [x])) / ((size_t)(!(sizeof(x) % sizeof(0 [x])))))
@@ -106,6 +107,7 @@ int networksFound;
 int networksPage = 0;
 unsigned int networksPageTotal = 0;
 unsigned long displayPageSubChange = 0;
+unsigned int langu = 0;
 
 #define CONFIG_VERSION "4"
 Preferences preferences;
@@ -116,6 +118,8 @@ WebServer server(80);
 HTTPUpdateServer httpUpdater;
 static const char chooserValues[][STRING_LEN] = {"0", "1", "2"};
 static const char chooserNames[][STRING_LEN] = {"Sensor 1", "Sensor 2", "Sensor 3"};
+static const char languValues[][STRING_LEN] = {"0", "1"};
+static const char languNames[][STRING_LEN] = {"German", "English"};
 IotWebConf iotWebConf("Zirkulationspumpe", &dnsServer, &server, "", CONFIG_VERSION);
 IotWebConfParameterGroup mqttGroup = IotWebConfParameterGroup("mqtt", "MQTT configuration");
 IotWebConfTextParameter mqttServerParam = IotWebConfTextParameter("server", "mqttServer", mqttServer, STRING_LEN);
@@ -139,6 +143,10 @@ iotwebconf::SelectTParameter<STRING_LEN> tempIntParam =
     iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempIntParam").label("Internal").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("3").build();
 iotwebconf::FloatTParameter tempRetDiffParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("tempRetDiffParam").label("Return Off Diff").defaultValue(10.0).step(0.5).placeholder("e.g. 23.4").build();
 iotwebconf::FloatTParameter tempTriggerParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("tempTriggerParam").label("Temperature Trigger").defaultValue(0.125).step(0.0625).placeholder("e.g. 0.12").build();
+IotWebConfParameterGroup miscGroup = IotWebConfParameterGroup("misc", "misc.");
+iotwebconf::SelectTParameter<STRING_LEN> languParam =
+    iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("languParam").label("Language").optionValues((const char *)languValues).optionNames((const char *)languNames).optionCount(sizeof(languValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("0").build();
+
 
 
 int mod(int x, int y)
@@ -518,7 +526,7 @@ void publishUptime()
 {
   char msg_out[20];
   uptime::calculateUptime();
-  sprintf(msg_out, "%04u Tage %02u:%02u:%02u", uptime::getDays(), uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
+  sprintf(msg_out, "%04u %s %02u:%02u:%02u", uptime::getDays(), txtDays[langu], uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
   // Serial.println(msg_out);
   mqttClient.publish(MQTT_PUB_INFO, 0, true, msg_out);
 }
@@ -546,16 +554,16 @@ void updateDisplay()
     switch (iotWebConf.getState())
     {
     case 0:
-      display.drawString(0, 0, "Booting");
+      display.drawString(0, 0, txtBoot[langu]);
       break;
     case 1:
-      display.drawString(0, 0, "Setup");
+      display.drawString(0, 0, txtSetup[langu]);
       break;
     case 2:
       display.drawString(0, 0, "AP");
       break;
     case 3:
-      display.drawString(0, 0, "Verbinde");
+      display.drawString(0, 0, txtConnecting[langu]);
       break;
     case 4:
       display.drawString(0, 0, "Online (" + String(WiFi.RSSI()) + ")");
@@ -574,24 +582,24 @@ void updateDisplay()
     if (sensorDetectionError)
     {
       display.setFont(ArialMT_Plain_16);
-      display.drawString(64, 14, "Sensorfehler!");
+      display.drawString(64, 14, txtSenseErr[langu]);
     }
     else
     {
       if (sensors.isConnected(sensorOut_id))
       {
         dtostrf(tempOut, 2, 2, tempStr);
-        display.drawString(64, 12, "Vorlauf: " + String(tempStr) + " C°");
+        display.drawString(64, 12, String(txtFlow[langu]) + ": " + String(tempStr) + " C°");
       }
       else
-        display.drawString(64, 12, "Vorlauf: ERROR!");
+        display.drawString(64, 12, String(txtFlow[langu]) + ": ERROR!");
       if (sensors.isConnected(sensorRet_id))
       {
         dtostrf(tempRet, 2, 2, tempStr);
-        display.drawString(64, 24, "Rücklauf: " + String(tempStr) + " C°");
+        display.drawString(64, 24, String(txtReturn[langu]) + ": " + String(tempStr) + " C°");
       }
       else
-        display.drawString(64, 24, "Rücklauf: ERROR!");
+        display.drawString(64, 24, String(txtReturn[langu]) + ": ERROR!");
     }
 
     display.setFont(ArialMT_Plain_24);
@@ -600,24 +608,24 @@ void updateDisplay()
     {
       display.invertDisplay();
       if (pumpManual)
-        display.drawString(64, 36, "Man. an");
+        display.drawString(64, 36, String(txtManualOn[langu]));
       else
-        display.drawString(64, 36, "Pumpe an");
+        display.drawString(64, 36, String(txtPumpOn[langu]));
     }
     else
     {
       display.normalDisplay();
       if (pumpManual)
-        display.drawString(64, 36, "Man. aus");
+        display.drawString(64, 36, String(txtManualOff[langu]));
       else
-        display.drawString(64, 36, "Pumpe aus");
+        display.drawString(64, 36, String(txtPumpOff[langu]));
     }
     break;
   case 1:
     // Display Page 2 - last 5 pump starts
     display.setFont(ArialMT_Plain_10);
     display.setTextAlignment(TEXT_ALIGN_CENTER);
-    display.drawString(64, 0, "Letzte Starts");
+    display.drawString(64, 0, String(txtLastRuns[langu]));
     display.drawLine(0, 11, 128, 11);
     lineStart = ((displayPageLastRuns)-1) * 5;
     lineEnd = lineStart + 4;
@@ -644,17 +652,17 @@ void updateDisplay()
     uptime::calculateUptime();
     display.setTextAlignment(TEXT_ALIGN_CENTER);
     display.setFont(ArialMT_Plain_10);
-    display.drawString(64, 0, "Laufzeit");
+    display.drawString(64, 0, txtRuntime[langu]);
     display.drawLine(0, 11, 128, 11);
     display.setFont(ArialMT_Plain_16);
-    display.drawString(64, 18, String(uptime::getDays()) + " Tage ");
+    display.drawString(64, 18, String(uptime::getDays()) + " " + String(txtDays[langu]));
     sprintf(uptimeStr, "%02u:%02u:%02u", uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
     display.drawString(64, 38, String(uptimeStr));
     break;
   case 3:
     display.setFont(ArialMT_Plain_10);
     display.setTextAlignment(TEXT_ALIGN_CENTER);
-    display.drawString(64, 0, "Sensoren");
+    display.drawString(64, 0, txtSensors[langu]);
     display.drawLine(0, 11, 128, 11);
     display.setFont(ArialMT_Plain_16);
     if (sensors.getAddress(sensor1_id, 0))
@@ -664,7 +672,7 @@ void updateDisplay()
       display.drawString(64, 12, "1: " + String(tempStr) + "°C");
     }
     else
-      display.drawString(64, 12, "1: kein Sensor");
+      display.drawString(64, 12, "1: " + String(txtNoSensor[langu]));
     if (sensors.getAddress(sensor2_id, 1))
     {
       temp = sensors.getTempC(sensor2_id);
@@ -672,7 +680,7 @@ void updateDisplay()
       display.drawString(64, 30, "2: " + String(tempStr) + "°C");
     }
     else
-      display.drawString(64, 30, "2: kein Sensor");
+      display.drawString(64, 30, "2: " + String(txtNoSensor[langu]));
     if (sensors.getAddress(sensor3_id, 2))
     {
       temp = sensors.getTempC(sensor3_id);
@@ -680,7 +688,7 @@ void updateDisplay()
       display.drawString(64, 48, "3: " + String(tempStr) + "°C");
     }
     else
-      display.drawString(64, 48, "3: kein Sensor");
+      display.drawString(64, 48, "3: " + String(txtNoSensor[langu]));
     break;
   case 4:
     display.setFont(ArialMT_Plain_10);
@@ -695,7 +703,7 @@ void updateDisplay()
     else
     {
       Serial.println("Unable to find address for Sensor 1");
-      display.drawString(64, 14, "1: kein Sensor");
+      display.drawString(64, 14, "1: " + String(txtNoSensor[langu]));
     }
     if (sensors.getAddress(sensor2_id, 1))
     {
@@ -705,7 +713,7 @@ void updateDisplay()
     else
     {
       Serial.println("Unable to find address for Sensor 2");
-      display.drawString(64, 32, "2: kein Sensor");
+      display.drawString(64, 32, "2: " + String(txtNoSensor[langu]));
     }
     if (sensors.getAddress(sensor3_id, 2))
     {
@@ -715,7 +723,7 @@ void updateDisplay()
     else
     {
       Serial.println("Unable to find address for Sensor 3");
-      display.drawString(64, 50, "3: kein Sensor");
+      display.drawString(64, 50, "3: " + String(txtNoSensor[langu]));
     }
     break;
   case 5:
@@ -726,16 +734,16 @@ void updateDisplay()
     switch (iotWebConf.getState())
     {
     case 0:
-      display.drawString(64, 12, "Booting");
+      display.drawString(64, 12, txtBoot[langu]);
       break;
     case 1:
-      display.drawString(64, 12, "Nicht konfiguriert");
+      display.drawString(64, 12, txtNotSetup[langu]);
       break;
     case 2:
       display.drawString(64, 12, "AP");
       break;
     case 3:
-      display.drawString(64, 12, "Verbinde...");
+      display.drawString(64, 12, String(txtConnecting[langu]) + "...");
       break;
     case 4:
       display.drawString(64, 12, "Online");
@@ -746,26 +754,26 @@ void updateDisplay()
     }
     display.drawString(64, 22, "SSID: " + WiFi.SSID());
     display.drawString(64, 32, "RSSI: " + String(WiFi.RSSI()));
-    display.drawString(64, 42, "Sendeleistung: " + String(WiFi.getTxPower()));
+    display.drawString(64, 42, String(txtTxPower[langu]) + ": " + String(WiFi.getTxPower()));
     if (WiFi.isConnected())
     {
       display.drawString(64, 52, WiFi.localIP().toString());
     }
     else
     {
-      display.drawString(64, 52, "keine IP");
+      display.drawString(64, 52, txtNoIp[langu]);
     }
     break;
   case 6:
     display.setFont(ArialMT_Plain_10);
     display.setTextAlignment(TEXT_ALIGN_CENTER);
-    display.drawString(64, 0, "WiFi Netzwerke");
+    display.drawString(64, 0, txtWifiNetwork[langu]);
     display.drawLine(0, 11, 128, 11);
     if (iotWebConf.getState() == 4)
     {
       display.setFont(ArialMT_Plain_16);
-      display.drawString(64, 18, "WiFi bereits");
-      display.drawString(64, 38, "verbunden");
+      display.drawString(64, 18, txtWifiConnected1[langu]);
+      display.drawString(64, 38, txtWifiConnected2[langu]);
     }
     else
     {
@@ -790,20 +798,20 @@ void updateDisplay()
       if (networksFound == -1)
       {
         display.setFont(ArialMT_Plain_24);
-        display.drawString(64, 24, "Suche...");
+        display.drawString(64, 24, txtSearching[langu]);
         lastScan = now;
       }
       else if (networksFound == -2)
       {
         display.setFont(ArialMT_Plain_24);
-        display.drawString(64, 24, "Warte...");
+        display.drawString(64, 24, txtWaiting[langu]);
       }
       else if (networksFound == 0)
       {
         Serial.print("Networks found: ");
         Serial.println(networksFound);
         display.setFont(ArialMT_Plain_16);
-        display.drawString(64, 24, "Keine APs");
+        display.drawString(64, 24, txtNoAp[langu]);
       }
       else
       {
@@ -994,6 +1002,8 @@ void setup()
   tempGroup.addItem(&tempRetDiffParam);
   tempGroup.addItem(&tempTriggerParam);
   iotWebConf.addParameterGroup(&tempGroup);
+  miscGroup.addItem(&languParam);
+  iotWebConf.addParameterGroup(&miscGroup);
 
   iotWebConf.setConfigSavedCallback(&configSaved);
   iotWebConf.setFormValidator(&formValidator);
@@ -1020,7 +1030,8 @@ void setup()
     iotWebConf.saveConfig();
     iotWebConf.resetWifiAuthInfo();
   }
-
+  
+  langu = atoi(languParam.value());
   // -- Set up required URL handlers on the web server.
   server.on("/", handleRoot);
   server.on("/config", []
