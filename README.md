@@ -36,7 +36,7 @@ On first start the thing will open an Access Point named "Zirkulationspumpe" to 
 
 1. Do the system configuration and set things name (hostname), AP password (if WiFi connection is lost) and WiFi credentials for your network.
 2. MQTT configuration (optional)
-   1. publish the following topics:
+   1. publish the following topics (folder structure can be changed):
       * "ww/ht/dhw_Tflow_measured": out temperature of the warm water
       * "ww/ht/dhw_Treturn": return temperture of the warm water circulation
       * "ww/ht/Tint": system internal temperture
