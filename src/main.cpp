@@ -96,6 +96,7 @@ Ticker mqttReconnectTimer;
 Ticker secTimer;
 Ticker displayTimer;
 Ticker sec10Timer;
+Ticker min10Timer;
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP);
@@ -969,8 +970,12 @@ void onSecTimer()
 
 void onSec10Timer()
 {
-  publishUptime();
   mqttSendtemp();
+}
+
+void onMin10Timer()
+{
+  publishUptime();
 }
 
 void setup()
@@ -992,7 +997,7 @@ void setup()
 
   // WiFi.onEvent(onWifiConnected, ARDUINO_EVENT_WIFI_STA_CONNECTED);
   WiFi.onEvent(onWifiDisconnect, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
-  WiFi.setTxPower(WIFI_POWER_19_5dBm);
+  // WiFi.setTxPower(WIFI_POWER_19_5dBm);
 
   if (!preferences.begin("wifi"))
   {
@@ -1075,7 +1080,7 @@ void setup()
 
   sensors.begin();
   // locate devices on the bus
-  Serial.print("Locating devices...");
+  Serial.print("Searching devices...");
   Serial.print("Found ");
   Serial.print(sensors.getDeviceCount(), DEC);
   Serial.println(" devices.");
@@ -1131,6 +1136,7 @@ void setup()
   // Timers
   secTimer.attach(1, onSecTimer);
   sec10Timer.attach(10, onSec10Timer);
+  min10Timer.attach(600, onMin10Timer);
   displayTimer.attach_ms(500, updateDisplay);
 }
 
