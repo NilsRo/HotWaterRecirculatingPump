@@ -43,6 +43,9 @@ unsigned long timeReleased = 0;
 float tempOut;
 float tempRet;
 float tempInt;
+float mqttTempOut;
+float mqttTempRet;
+float mqttTempInt;
 unsigned int checkCnt;
 
 // Setup a oneWire instance to communicate with any OneWire devices
@@ -70,15 +73,16 @@ bool needReset = false;
 // For a cloud MQTT broker, type the domain name
 //#define MQTT_HOST "example.com"
 #define MQTT_PORT 1883
-#define MQTT_PUB_TEMP_OUT "ww/ht/dhw_Tflow_measured"
-#define MQTT_PUB_TEMP_RET "ww/ht/dhw_Treturn"
-#define MQTT_PUB_TEMP_INT "ww/ht/Tint"
-#define MQTT_PUB_PUMP "ww/ht/dhw_pump_circulation"
-#define MQTT_PUB_INFO "ww/ht/info"
+#define MQTT_PUB_TEMP_OUT "dhw_Tflow_measured"
+#define MQTT_PUB_TEMP_RET "dhw_Treturn"
+#define MQTT_PUB_TEMP_INT "Tint"
+#define MQTT_PUB_PUMP "dhw_pump_circulation"
+#define MQTT_PUB_INFO "info"
 AsyncMqttClient mqttClient;
 char mqttServer[STRING_LEN];
 char mqttUser[STRING_LEN];
 char mqttPassword[STRING_LEN];
+char mqttTopicPath[STRING_LEN];
 char mqttHeaterStatusTopic[STRING_LEN];
 char mqttHeaterStatusValue[STRING_LEN];
 bool mqttHeaterStatus = true;
@@ -125,6 +129,7 @@ IotWebConfParameterGroup mqttGroup = IotWebConfParameterGroup("mqtt", "MQTT conf
 IotWebConfTextParameter mqttServerParam = IotWebConfTextParameter("server", "mqttServer", mqttServer, STRING_LEN);
 IotWebConfTextParameter mqttUserNameParam = IotWebConfTextParameter("user", "mqttUser", mqttUser, STRING_LEN);
 IotWebConfPasswordParameter mqttUserPasswordParam = IotWebConfPasswordParameter("password", "mqttPassword", mqttPassword, STRING_LEN);
+IotWebConfTextParameter mqttTopicPathParam = IotWebConfTextParameter("topicpath", "mqttTopicPath", mqttTopicPath, STRING_LEN, "ww/ht/");
 IotWebConfTextParameter mqttHeaterStatusTopicParam = IotWebConfTextParameter("heater status topic", "mqttHeaterStatusTopic", mqttHeaterStatusTopic, STRING_LEN, "ht3/hometop/ht/hc1_Tniveau");
 IotWebConfTextParameter mqttHeaterStatusValueParam = IotWebConfTextParameter("heater status value", "mqttHeaterStatusValue", mqttHeaterStatusValue, STRING_LEN, "3");
 IotWebConfTextParameter mqttPumpTopicParam = IotWebConfTextParameter("external pump start topic", "mqttPumpTopic", mqttPumpTopic, STRING_LEN, "");
@@ -425,13 +430,18 @@ void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties 
     mqttHeaterStatus = (strcmp(mqttHeaterStatusValue, new_payload) == 0);
   }
 }
+
+void mqttPublish(const char* topic, const char* payload)
+{
+      mqttClient.publish(strcat(mqttTopicPath, topic), 0, true, payload);
+}
 //-- END SECTION: connection handling
 
 void checkSensors()
 {
   if (sensorDetectionError)
   {
-    mqttClient.publish(MQTT_PUB_INFO, 0, true, "Sensorfehler");
+    mqttPublish(MQTT_PUB_INFO, "Sensorfehler");
     sensorError = true;
   }
   else
@@ -439,14 +449,14 @@ void checkSensors()
     if (sensors.isConnected(sensorInt_id) && sensors.isConnected(sensorInt_id) && sensors.isConnected(sensorInt_id))
     {
       if (sensorError)
-        mqttClient.publish(MQTT_PUB_INFO, 0, true, "Sensorfehler behoben");
+        mqttPublish(MQTT_PUB_INFO, "Sensorfehler behoben");
       sensorError = false;
       sensors.setResolution(sensorOut_id, 12); // hohe Genauigkeit
       sensors.setResolution(sensorRet_id, 12); // hohe Genauigkeit
     }
     else
     {
-      mqttClient.publish(MQTT_PUB_INFO, 0, true, "Sensorfehler");
+      mqttPublish(MQTT_PUB_INFO, "Sensorfehler");
       sensorError = true;
     }
   }
@@ -469,12 +479,24 @@ void getTemp()
 void mqttSendtemp()
 {
   char msg_out[20];
-  dtostrf(tempOut, 2, 2, msg_out);
-  mqttClient.publish(MQTT_PUB_TEMP_OUT, 0, true, msg_out);
-  dtostrf(tempRet, 2, 2, msg_out);
-  mqttClient.publish(MQTT_PUB_TEMP_RET, 0, true, msg_out);
-  dtostrf(tempInt, 2, 2, msg_out);
-  mqttClient.publish(MQTT_PUB_TEMP_INT, 0, true, msg_out);
+  if (tempOut != mqttTempOut)
+  {
+    dtostrf(tempOut, 2, 2, msg_out);
+    mqttTempOut = tempOut;
+    mqttPublish(MQTT_PUB_TEMP_OUT, msg_out);
+  }
+  if (tempRet != mqttTempRet)
+  {
+    dtostrf(tempRet, 2, 2, msg_out);
+    mqttTempRet = tempRet;
+    mqttPublish(MQTT_PUB_TEMP_RET, msg_out);
+  }
+  if (tempInt != mqttTempInt)
+  {
+    dtostrf(tempInt, 2, 2, msg_out);
+    mqttTempInt = tempInt;
+    mqttPublish(MQTT_PUB_TEMP_INT, msg_out);
+  }
 }
 
 void printAddress(DeviceAddress deviceAddress)
@@ -528,7 +550,7 @@ void publishUptime()
   uptime::calculateUptime();
   sprintf(msg_out, "%04u %s %02u:%02u:%02u", uptime::getDays(), txtDays[langu], uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
   // Serial.println(msg_out);
-  mqttClient.publish(MQTT_PUB_INFO, 0, true, msg_out);
+  mqttPublish(MQTT_PUB_INFO, msg_out);
 }
 
 void updateDisplay()
@@ -636,7 +658,7 @@ void updateDisplay()
     for (int i = lineStart; i <= lineEnd; i++)
     { // display last 5 pumpOn Events in right order
       byte arrIndex = mod((((int)pumpCnt) - i), nils_length(pump));
-      display.drawString(0, lineCnt * 10 + 2, String(i + 1) + ": " + pump[arrIndex]);
+      display.drawString(0, lineCnt * 10 + 2, String(i + 1) + ": " + pump[arrIndex].substring(1, pump[arrIndex].length() - 4));
       lineCnt++;
     }
     if ((10000 < now - displayPageSubChange))
@@ -862,7 +884,7 @@ void pumpOn()
 {
   char tempStr[128];
   Serial.println("Turn on circulation");
-  mqttClient.publish(MQTT_PUB_PUMP, 2, true, "1");
+  mqttPublish(MQTT_PUB_PUMP, "1");
   pumpRunning = true;
   pumpStartedAt = millis();
   digitalWrite(PUMPPIN, LOW);
@@ -880,7 +902,7 @@ void pumpOn()
 void pumpOff()
 {
   Serial.println("Turn off circulation");
-  mqttClient.publish(MQTT_PUB_PUMP, 2, true, "0");
+  mqttPublish(MQTT_PUB_PUMP, "0");
   pumpRunning = false;
   pump[pumpCnt] += " (" + String((int)round((millis() - pumpStartedAt) / 1000 / 60)) + " min.)";
   digitalWrite(PUMPPIN, HIGH);
@@ -986,6 +1008,7 @@ void setup()
   mqttGroup.addItem(&mqttServerParam);
   mqttGroup.addItem(&mqttUserNameParam);
   mqttGroup.addItem(&mqttUserPasswordParam);
+  mqttGroup.addItem(&mqttTopicPathParam);
   mqttGroup.addItem(&mqttHeaterStatusTopicParam);
   mqttGroup.addItem(&mqttHeaterStatusValueParam);
   mqttGroup.addItem(&mqttPumpTopicParam);
