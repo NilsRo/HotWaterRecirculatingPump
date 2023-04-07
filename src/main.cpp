@@ -114,7 +114,7 @@ unsigned int networksPageTotal = 0;
 unsigned long displayPageSubChange = 0;
 unsigned int langu = 0;
 
-#define CONFIG_VERSION "4"
+#define CONFIG_VERSION "5"
 Preferences preferences;
 int iotWebConfPinState = HIGH;
 unsigned long iotWebConfPinChanged = 0;
@@ -180,6 +180,9 @@ void handleRoot()
   s += "<table border = \"0\"><tr>";
   s += "<td>" + String(mqttServerParam.label) + ": </td>";
   s += "<td>" + String(mqttServer) + "</td>";
+  s += "</tr><tr>";
+  s += "<td>" + String(mqttTopicPathParam.label) + ": </td>";
+  s += "<td>" + String(mqttTopicPath) + "</td>";
   s += "</tr><tr>";
   s += "<td>" + String(mqttHeaterStatusTopicParam.label) + ": </td>";
   s += "<td>" + String(mqttHeaterStatusTopic) + " - " + String(mqttHeaterStatusValue) + "</td>";
@@ -434,7 +437,10 @@ void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties 
 
 void mqttPublish(const char* topic, const char* payload)
 {
-      mqttClient.publish(strcat(mqttTopicPath, topic), 0, true, payload);
+  std::string tempTopic;
+  tempTopic.append(mqttTopicPath);
+  tempTopic.append(topic);
+  mqttClient.publish(tempTopic.c_str(), 0, true, payload);
 }
 //-- END SECTION: connection handling
 
