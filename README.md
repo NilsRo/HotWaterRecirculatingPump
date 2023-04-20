@@ -60,5 +60,5 @@ On first start the thing will open an Access Point named "Zirkulationspumpe" to 
 
 # Tips
 * Increase the pumps flow to the maximum that the water goes through the pipes as fast as possible.
-* Setup special schedules via a smart home if you like to have warm water on request (e.g. by phone) or at a specific time.
+* Setup special schedules via a smart home (MQTT) if you like to have warm water on request (e.g. by phone) or at a specific time.
 * second relay channel is actually unused - suggest how to use it if you need
