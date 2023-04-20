@@ -160,6 +160,25 @@ int mod(int x, int y)
   return x < 0 ? ((x + 1) % y) + y - 1 : x % y;
 }
 
+String verbose_print_reset_reason(esp_reset_reason_t reason)
+{
+  switch (reason)
+  {
+    case ESP_RST_UNKNOWN  : return(" Reset reason can not be determined");
+    case ESP_RST_POWERON  : return("Reset due to power-on event");
+    case ESP_RST_EXT  : return("Reset by external pin (not applicable for ESP32)");
+    case ESP_RST_SW  : return("Software reset via esp_restart");
+    case ESP_RST_PANIC  : return("Software reset due to exception/panic");
+    case ESP_RST_INT_WDT  : return("Reset (software or hardware) due to interrupt watchdog");
+    case ESP_RST_TASK_WDT  : return("Reset due to task watchdog");
+    case ESP_RST_WDT  : return("Reset due to other watchdogs");
+    case ESP_RST_DEEPSLEEP : return("Reset after exiting deep sleep mode");
+    case ESP_RST_BROWNOUT : return("Brownout reset (software or hardware)");
+    case ESP_RST_SDIO : return("Reset over SDIO");
+    default : return("NO_MEAN");
+  }
+}
+
 // -- SECTION: Wifi Manager
 void handleRoot()
 {
@@ -260,6 +279,7 @@ void handleRoot()
   uptime::calculateUptime();
   sprintf(tempStr, "%04u Tage %02u:%02u:%02u", uptime::getDays(), uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
   s += "<p>Uptime: " + String(tempStr);
+  s += "<p>Last reset: " + verbose_print_reset_reason(esp_reset_reason());
   s += "</fieldset>";
 
   s += "<p>Go to <a href='config'>Configuration</a>";
