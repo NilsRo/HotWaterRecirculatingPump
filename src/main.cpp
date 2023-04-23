@@ -81,11 +81,11 @@ bool needReset = false;
 #define MQTT_PUB_PUMP "dhw_pump_circulation"
 #define MQTT_PUB_INFO "info"
 AsyncMqttClient mqttClient;
+String mqttDisconnectReason;
 char mqttServer[STRING_LEN];
 char mqttUser[STRING_LEN];
 char mqttPassword[STRING_LEN];
 char mqttTopicPath[STRING_LEN];
-bool mqttInit = true;
 char mqttHeaterStatusTopic[STRING_LEN];
 char mqttHeaterStatusValue[STRING_LEN];
 bool mqttHeaterStatus = true;
@@ -192,7 +192,7 @@ bool checkCoreDump()
     const esp_partition_t *pt = NULL;
     pt = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, "coredump");
     if (pt != NULL)
-      return true;    
+      return true;
     else
       return false;
   }
@@ -211,7 +211,7 @@ void handleRoot()
   }
   char tempStr[128];
 
-  String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";  
+  String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
   s += iotWebConf.getHtmlFormatProvider()->getStyle();
   s += "<title>Warmwater Recirculation Pump</title>";
   s += iotWebConf.getHtmlFormatProvider()->getHeadEnd();
@@ -231,9 +231,13 @@ void handleRoot()
   s += "<td>" + String(mqttPumpTopic) + " - " + String(mqttPumpValue) + "</td>";
   s += "</tr><tr>";
   s += "<td>" + String(mqttThermalDesinfectionTopicParam.label) + ": </td>";
-  s += "<td>" + String(mqttThermalDesinfectionTopic) + " - " + String(mqttThermalDesinfectionValue) + "</td>";  
+  s += "<td>" + String(mqttThermalDesinfectionTopic) + " - " + String(mqttThermalDesinfectionValue) + "</td>";
+  s += "</tr><tr>";
+  s += "<td>last disconnect reason: </td>";
+  s += "<td>" + mqttDisconnectReason + "</td>";
+  s += "</tr><tr>";
   s += "</tr></table></fieldset>";
- 
+
   s += "<fieldset id=" + String(ntpGroup.getId()) + ">";
   s += "<legend>" + String(ntpGroup.label) + "</legend>";
   s += "<table border = \"0\"><tr>";
@@ -271,9 +275,9 @@ void handleRoot()
   dtostrf(tempInt, 2, 2, tempStr);
   s += " / " + String(tempStr) + "&#8451;";
   s += "</td>";
-  s += "</tr><tr>";    
+  s += "</tr><tr>";
   s += "<td>" + String(tempRetDiffParam.label) + ": </td>";
-  s += "<td>";  
+  s += "<td>";
   s += tempRetDiffParam.value();
   s += "&#8451;</td>";
   s += "</tr></table></fieldset>";
@@ -319,7 +323,7 @@ void configSaved()
   preferences.putString("wifiPassword", String(iotWebConf.getWifiAuthInfo().password));
 
   Serial.println("Configuration saved.");
-  // TODO: Neustart bei normalen Parametern vermeiden  
+  // TODO: Neustart bei normalen Parametern vermeiden
   needReset = true;
 }
 
@@ -339,6 +343,10 @@ bool formValidator(iotwebconf::WebRequestWrapper *webRequestWrapper)
 }
 
 //-- SECTION: connection handling
+// Necessary forward declarations
+void mqttSendTopics(bool mqttInit = false);
+//--
+
 void setTimezone(String timezone)
 {
   Serial.printf("  Setting Timezone to %s\n", ntpTimezone);
@@ -348,8 +356,11 @@ void setTimezone(String timezone)
 
 void connectToMqtt()
 {
-  Serial.println("Connecting to MQTT...");
-  mqttClient.connect();
+  if (strlen(mqttServer) > 0)
+  {
+    Serial.println("Connecting to MQTT...");
+    mqttClient.connect();
+  }
 }
 
 void onWifiConnected()
@@ -367,8 +378,6 @@ void onWifiDisconnect(WiFiEvent_t event, WiFiEventInfo_t info)
   timeClient.end();
 }
 
-void mqttSendTopics();
-
 void onMqttConnect(bool sessionPresent)
 {
   Serial.println("Connected to MQTT.");
@@ -377,7 +386,6 @@ void onMqttConnect(bool sessionPresent)
   uint16_t packetIdSub;
   if (strlen(mqttHeaterStatusTopic) > 0)
   {
-
     packetIdSub = mqttClient.subscribe(mqttHeaterStatusTopic, 2);
     Serial.print("Subscribed to topic: ");
     Serial.println(String(mqttHeaterStatusTopic) + " - " + String(packetIdSub));
@@ -391,35 +399,33 @@ void onMqttConnect(bool sessionPresent)
     Serial.println(String(mqttPumpTopic) + " - " + String(packetIdSub));
   }
   digitalWrite(LED_BUILTIN, HIGH);
-  mqttInit = true;
-  mqttSendTopics();
+  mqttSendTopics(true);
 }
 
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason)
 {
-  String text;
   switch (reason)
   {
   case AsyncMqttClientDisconnectReason::TCP_DISCONNECTED:
-    text = "TCP_DISCONNECTED";
+    mqttDisconnectReason = "TCP_DISCONNECTED";
     break;
   case AsyncMqttClientDisconnectReason::MQTT_UNACCEPTABLE_PROTOCOL_VERSION:
-    text = "MQTT_UNACCEPTABLE_PROTOCOL_VERSION";
+    mqttDisconnectReason = "MQTT_UNACCEPTABLE_PROTOCOL_VERSION";
     break;
   case AsyncMqttClientDisconnectReason::MQTT_IDENTIFIER_REJECTED:
-    text = "MQTT_IDENTIFIER_REJECTED";
+    mqttDisconnectReason = "MQTT_IDENTIFIER_REJECTED";
     break;
   case AsyncMqttClientDisconnectReason::MQTT_SERVER_UNAVAILABLE:
-    text = "MQTT_SERVER_UNAVAILABLE";
+    mqttDisconnectReason = "MQTT_SERVER_UNAVAILABLE";
     break;
   case AsyncMqttClientDisconnectReason::MQTT_MALFORMED_CREDENTIALS:
-    text = "MQTT_MALFORMED_CREDENTIALS";
+    mqttDisconnectReason = "MQTT_MALFORMED_CREDENTIALS";
     break;
   case AsyncMqttClientDisconnectReason::MQTT_NOT_AUTHORIZED:
-    text = "MQTT_NOT_AUTHORIZED";
+    mqttDisconnectReason = "MQTT_NOT_AUTHORIZED";
     break;
   }
-  Serial.printf(" [%8u] Disconnected from the broker reason = %s\n", millis(), text.c_str());
+  Serial.printf(" [%8u] Disconnected from the broker reason = %s\n", millis(), mqttDisconnectReason.c_str());
   Serial.printf(" [%8u] Reconnecting to MQTT..\n", millis());
   digitalWrite(LED_BUILTIN, LOW);
 
@@ -501,7 +507,7 @@ void mqttPublishUptime()
   mqttPublish(MQTT_PUB_INFO, msg_out);
 }
 
-void mqttSendTopics()
+void mqttSendTopics(bool mqttInit)
 {
   char msg_out[20];
   if (tempOut != mqttTempOut || mqttInit)
@@ -532,7 +538,6 @@ void mqttSendTopics()
   }
 
   if (mqttInit)
-    mqttInit = false;
     mqttPublishUptime();
 }
 
@@ -540,7 +545,7 @@ void checkSensors()
 {
   if (sensorDetectionError)
   {
-    mqttPublish(MQTT_PUB_INFO, "Sensorfehler");
+    mqttPublish(MQTT_PUB_INFO, "sensorerror");
     sensorError = true;
   }
   else
@@ -548,14 +553,14 @@ void checkSensors()
     if (sensors.isConnected(sensorInt_id) && sensors.isConnected(sensorInt_id) && sensors.isConnected(sensorInt_id))
     {
       if (sensorError)
-        mqttPublish(MQTT_PUB_INFO, "Sensorfehler behoben");
+        mqttPublish(MQTT_PUB_INFO, "sensorerror solved");
       sensorError = false;
       sensors.setResolution(sensorOut_id, 12); // hohe Genauigkeit
       sensors.setResolution(sensorRet_id, 12); // hohe Genauigkeit
     }
     else
     {
-      mqttPublish(MQTT_PUB_INFO, "Sensorfehler");
+      mqttPublish(MQTT_PUB_INFO, "sensorerror");
       sensorError = true;
     }
   }
@@ -1157,7 +1162,7 @@ void setup()
   {
     Serial.println("Error opening NVS-Namespace");
     for (;;);  // leere Dauerschleife -> Ende
-  }    
+  }
   iotWebConf.setupUpdateServer(
       [](const char *updatePath)
       { httpUpdater.setup(&server, updatePath); },
@@ -1190,29 +1195,29 @@ void setup()
   iotWebConf.setConfigSavedCallback(&configSaved);
   iotWebConf.setFormValidator(&formValidator);
   iotWebConf.setWifiConnectionCallback(&onWifiConnected);
-  iotWebConf.setConfigPin(WIFICONFIGPIN);  
+  iotWebConf.setConfigPin(WIFICONFIGPIN);
 
   bool validConfig = iotWebConf.init();
   if (!validConfig)
   {
     Serial.println("Invalid config detected - restoring WiFi settings...");
-    // much better handling than iotWebConf library to avoid lost wifi on configuration change    
+    // much better handling than iotWebConf library to avoid lost wifi on configuration change
     if (preferences.isKey("apPassword"))
       strncpy(iotWebConf.getApPasswordParameter()->valueBuffer, preferences.getString("apPassword").c_str(), iotWebConf.getApPasswordParameter()->getLength());
     else
       String("AP Password not found for restauration.");
-    if (preferences.isKey("wifiSsid")) 
+    if (preferences.isKey("wifiSsid"))
       strncpy(iotWebConf.getWifiSsidParameter()->valueBuffer, preferences.getString("wifiSsid").c_str(), iotWebConf.getWifiSsidParameter()->getLength());
     else
       String("WiFi SSID not found for restauration.");
-    if (preferences.isKey("wifiPassword")) 
+    if (preferences.isKey("wifiPassword"))
       strncpy(iotWebConf.getWifiPasswordParameter()->valueBuffer, preferences.getString("wifiPassword").c_str(), iotWebConf.getWifiPasswordParameter()->getLength());
     else
       String("WiFi Password not found for restauration.");
     iotWebConf.saveConfig();
     iotWebConf.resetWifiAuthInfo();
   }
-  
+
   langu = atoi(languParam.value());
   // -- Set up required URL handlers on the web server.
   server.on("/", handleRoot);
