@@ -46,6 +46,7 @@ On first start the thing will open an Access Point named "Zirkulationspumpe" to 
 4. NTP configuration to get RTC infos for logging (default is fine for german timezone)
 5. Temperature configuration to map DS18B20 sensors detected
 6. Define your return temperature to switch off when the water is gone through the whole circulation pipe.
+7. Hold button for testing the relay/pump.
 
 ![config page](img/opera_2022-10-31%20213941.png)
 
