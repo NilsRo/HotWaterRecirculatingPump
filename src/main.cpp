@@ -18,6 +18,8 @@
 #include <uptime.h>
 #include <algorithm>
 #include <langu.h>
+#include <esp_core_dump.h>
+
 
 #define STRING_LEN 128
 #define nils_length(x) ((sizeof(x) / sizeof(0 [x])) / ((size_t)(!(sizeof(x) % sizeof(0 [x])))))
@@ -83,12 +85,14 @@ char mqttServer[STRING_LEN];
 char mqttUser[STRING_LEN];
 char mqttPassword[STRING_LEN];
 char mqttTopicPath[STRING_LEN];
+bool mqttInit = true;
 char mqttHeaterStatusTopic[STRING_LEN];
 char mqttHeaterStatusValue[STRING_LEN];
 bool mqttHeaterStatus = true;
 char mqttPumpTopic[STRING_LEN];
 char mqttPumpValue[STRING_LEN];
 bool mqttPump = false;
+bool mqttPumpRunning = false;
 char mqttThermalDesinfectionTopic[STRING_LEN];
 char mqttThermalDesinfectionValue[STRING_LEN];
 
@@ -177,6 +181,23 @@ String verbose_print_reset_reason(esp_reset_reason_t reason)
     case ESP_RST_SDIO : return("Reset over SDIO");
     default : return("NO_MEAN");
   }
+}
+
+bool checkCoreDump()
+{
+  size_t size = 0;
+  size_t address = 0;
+  if (esp_core_dump_image_get(&address, &size) == ESP_OK)
+  {
+    const esp_partition_t *pt = NULL;
+    pt = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, "coredump");
+    if (pt != NULL)
+      return true;    
+    else
+      return false;
+  }
+  else
+    return false;
 }
 
 // -- SECTION: Wifi Manager
@@ -280,11 +301,14 @@ void handleRoot()
   sprintf(tempStr, "%04u Tage %02u:%02u:%02u", uptime::getDays(), uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
   s += "<p>Uptime: " + String(tempStr);
   s += "<p>Last reset: " + verbose_print_reset_reason(esp_reset_reason());
+  if (checkCoreDump())
+    s += "<p>Core Dump found";
+  else
+    s += "<p>No Core Dump found";
   s += "</fieldset>";
 
   s += "<p>Go to <a href='config'>Configuration</a>";
   s += iotWebConf.getHtmlFormatProvider()->getEnd();
-
   server.send(200, "text/html", s);
 }
 
@@ -343,6 +367,8 @@ void onWifiDisconnect(WiFiEvent_t event, WiFiEventInfo_t info)
   timeClient.end();
 }
 
+void mqttSendTopics();
+
 void onMqttConnect(bool sessionPresent)
 {
   Serial.println("Connected to MQTT.");
@@ -365,6 +391,8 @@ void onMqttConnect(bool sessionPresent)
     Serial.println(String(mqttPumpTopic) + " - " + String(packetIdSub));
   }
   digitalWrite(LED_BUILTIN, HIGH);
+  mqttInit = true;
+  mqttSendTopics();
 }
 
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason)
@@ -464,6 +492,50 @@ void mqttPublish(const char* topic, const char* payload)
 }
 //-- END SECTION: connection handling
 
+void mqttPublishUptime()
+{
+  char msg_out[20];
+  uptime::calculateUptime();
+  sprintf(msg_out, "%04u %s %02u:%02u:%02u", uptime::getDays(), txtDays[langu], uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
+  // Serial.println(msg_out);
+  mqttPublish(MQTT_PUB_INFO, msg_out);
+}
+
+void mqttSendTopics()
+{
+  char msg_out[20];
+  if (tempOut != mqttTempOut || mqttInit)
+  {
+    dtostrf(tempOut, 2, 2, msg_out);
+    mqttTempOut = tempOut;
+    mqttPublish(MQTT_PUB_TEMP_OUT, msg_out);
+  }
+  if (tempRet != mqttTempRet || mqttInit)
+  {
+    dtostrf(tempRet, 2, 2, msg_out);
+    mqttTempRet = tempRet;
+    mqttPublish(MQTT_PUB_TEMP_RET, msg_out);
+  }
+  if (tempInt != mqttTempInt || mqttInit)
+  {
+    dtostrf(tempInt, 2, 2, msg_out);
+    mqttTempInt = tempInt;
+    mqttPublish(MQTT_PUB_TEMP_INT, msg_out);
+  }
+  if (pumpRunning != mqttPumpRunning || mqttInit)
+  {
+    mqttPumpRunning = pumpRunning;
+    if (pumpRunning)
+      mqttPublish(MQTT_PUB_PUMP, "1");
+    else
+      mqttPublish(MQTT_PUB_PUMP, "0");
+  }
+
+  if (mqttInit)
+    mqttInit = false;
+    mqttPublishUptime();
+}
+
 void checkSensors()
 {
   if (sensorDetectionError)
@@ -501,29 +573,6 @@ void getTemp()
   // Serial.println(tempRet);
   // Serial.print(" Temp Int: ");
   // Serial.println(tempInt);
-}
-
-void mqttSendtemp()
-{
-  char msg_out[20];
-  if (tempOut != mqttTempOut)
-  {
-    dtostrf(tempOut, 2, 2, msg_out);
-    mqttTempOut = tempOut;
-    mqttPublish(MQTT_PUB_TEMP_OUT, msg_out);
-  }
-  if (tempRet != mqttTempRet)
-  {
-    dtostrf(tempRet, 2, 2, msg_out);
-    mqttTempRet = tempRet;
-    mqttPublish(MQTT_PUB_TEMP_RET, msg_out);
-  }
-  if (tempInt != mqttTempInt)
-  {
-    dtostrf(tempInt, 2, 2, msg_out);
-    mqttTempInt = tempInt;
-    mqttPublish(MQTT_PUB_TEMP_INT, msg_out);
-  }
 }
 
 void printAddress(DeviceAddress deviceAddress)
@@ -569,15 +618,6 @@ void updateTime()
     timeClient.update();
     getLocalTime();
   }
-}
-
-void publishUptime()
-{
-  char msg_out[20];
-  uptime::calculateUptime();
-  sprintf(msg_out, "%04u %s %02u:%02u:%02u", uptime::getDays(), txtDays[langu], uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
-  // Serial.println(msg_out);
-  mqttPublish(MQTT_PUB_INFO, msg_out);
 }
 
 void updateDisplay()
@@ -911,10 +951,10 @@ void pumpOn()
 {
   char tempStr[128];
   Serial.println("Turn on circulation");
-  mqttPublish(MQTT_PUB_PUMP, "1");
   pumpRunning = true;
   pumpStartedAt = millis();
   digitalWrite(PUMPPIN, LOW);
+  mqttSendTopics();
   // digitalWrite(VALVEPIN, HIGH);
   Serial.print("Pump on: ");
   strftime(tempStr, 40, "%d.%m.%Y %T", &localTime);
@@ -929,10 +969,10 @@ void pumpOn()
 void pumpOff()
 {
   Serial.println("Turn off circulation");
-  mqttPublish(MQTT_PUB_PUMP, "0");
   pumpRunning = false;
   pump[pumpCnt] += " (" + String((int)round((millis() - pumpStartedAt) / 1000 / 60)) + " min.)";
   digitalWrite(PUMPPIN, HIGH);
+  mqttSendTopics();
   // digitalWrite(VALVEPIN, LOW);
 }
 
@@ -996,18 +1036,106 @@ void onSecTimer()
 
 void onSec10Timer()
 {
-  mqttSendtemp();
+  mqttSendTopics();
 }
 
 void onMin10Timer()
 {
-  publishUptime();
+  mqttPublishUptime();
 }
+
+void readCoreDump()
+{
+  size_t size = 0;
+  size_t address = 0;
+  if (esp_core_dump_image_get(&address, &size) == ESP_OK)
+  {
+    const esp_partition_t *pt = NULL;
+    pt = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, "coredump");
+
+    if (pt != NULL)
+    {
+      uint8_t bf[256];
+      char str_dst[640];
+      int16_t toRead;
+
+      for (int16_t i = 0; i < (size / 256) + 1; i++)
+      {
+        strcpy(str_dst, "");
+        toRead = (size - i * 256) > 256 ? 256 : (size - i * 256);
+
+        esp_err_t er = esp_partition_read(pt, i * 256, bf, toRead);
+        if (er != ESP_OK)
+        {
+          Serial.printf("FAIL [%x]\n",er);
+          //ESP_LOGE("ESP32", "FAIL [%x]", er);
+          break;
+        }
+
+        for (int16_t j = 0; j < 256; j++)
+        {
+          char str_tmp[3];
+
+          sprintf(str_tmp, "%02x", bf[j]);
+          strcat(str_dst, str_tmp);
+        }
+
+        printf("%s", str_dst);
+      }
+    }
+    else
+    {
+      Serial.println("Partition NULL");
+      //ESP_LOGE("ESP32", "Partition NULL");
+    }
+    // esp_core_dump_image_erase();
+  }
+  else
+  {
+    Serial.println("esp_core_dump_image_get() FAIL");
+    //ESP_LOGI("ESP32", "esp_core_dump_image_get() FAIL");
+  }
+}
+
+// esp_err_t esp_core_dump_image_erase()
+// {
+//     /* Find the partition that could potentially contain a (previous) core dump. */
+//     const esp_partition_t *core_part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA,
+//                                                                 ESP_PARTITION_SUBTYPE_DATA_COREDUMP,
+//                                                                 "coredump");
+//     if (!core_part) {
+//         Serial.println("No core dump partition found!");
+//         return ESP_ERR_NOT_FOUND;
+//     }
+//     if (core_part->size < sizeof(uint32_t)) {
+//         Serial.println("Too small core dump partition!");
+//         return ESP_ERR_INVALID_SIZE;
+//     }
+
+//     esp_err_t err = ESP_OK;
+//     err = esp_partition_erase_range(core_part, 0, core_part->size);
+//     if (err != ESP_OK) {
+//         Serial.printf("Failed to erase core dump partition (%d)!\n", err);
+//         return err;
+//     }
+
+//     // on encrypted flash esp_partition_erase_range will leave encrypted
+//     // garbage instead of 0xFFFFFFFF so overwriting again to safely signalize
+//     // deleted coredumps
+//     const uint32_t invalid_size = 0xFFFFFFFF;
+//     err = esp_partition_write(core_part, 0, &invalid_size, sizeof(invalid_size));
+//     if (err != ESP_OK) {
+//         Serial.printf("Failed to write core dump partition size (%d)!\n", err);
+//     }
+
+//     return err;
+// }
 
 void setup()
 {
   // basic setup
   Serial.begin(115200);
+  esp_core_dump_init();
   pinMode(LED_BUILTIN, OUTPUT);
   pinMode(PUMPPIN, OUTPUT);
   pinMode(VALVEPIN, OUTPUT);
