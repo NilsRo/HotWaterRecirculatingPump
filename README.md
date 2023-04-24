@@ -32,7 +32,7 @@ In the HT3 warm water diagram you see the period without warm water taking is fl
 The flow sensor have to be mounted 50cm away from the hot water reserviour. The return sensor near the end of the return pipe but not side by side to the reserviour. 
 
 # Software
-On first start the thing will open an Access Point named "Zirkulationspumpe" to provide the setup interface. The interface is still available after the device is connected so you can change everything later. 
+On first start the thing will open an Access Point named "Zirkulationspumpe" to provide the setup interface. The interface is still available after the device is connected so you can change everything later. But at first the firmware has to be uploaded. You can compile your own version or use the firmware provided in the releases.
 
 1. Do the system configuration and set things name (hostname), AP password (if WiFi connection is lost) and WiFi credentials for your network.
 2. MQTT configuration (optional)
