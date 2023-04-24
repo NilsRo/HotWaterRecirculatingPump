@@ -38,7 +38,6 @@ bool pumpCntInit = true;
 static float t[] = {255.0, 255.0, 255.0, 255.0, 255.0}; // letzten 5 Temepraturwerte speichern
 bool pumpRunning = false;
 bool pumpManual = false;
-bool thermalDesinfection = false;
 unsigned long pumpBlock = 0;
 unsigned long pumpStartedAt = 0;
 unsigned long timePressed = 0;
