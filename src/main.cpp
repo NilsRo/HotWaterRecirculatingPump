@@ -38,6 +38,7 @@ bool pumpCntInit = true;
 static float t[] = {255.0, 255.0, 255.0, 255.0, 255.0}; // letzten 5 Temepraturwerte speichern
 bool pumpRunning = false;
 bool pumpManual = false;
+bool thermalDesinfection = false;
 unsigned long pumpBlock = 0;
 unsigned long pumpStartedAt = 0;
 unsigned long timePressed = 0;
@@ -95,6 +96,8 @@ bool mqttPump = false;
 bool mqttPumpRunning = false;
 char mqttThermalDesinfectionTopic[STRING_LEN];
 char mqttThermalDesinfectionValue[STRING_LEN];
+bool mqttThermalDesinfection = false;
+
 
 Ticker mqttReconnectTimer;
 Ticker secTimer;
@@ -130,7 +133,7 @@ static const char chooserNames[][STRING_LEN] = {"Sensor 1", "Sensor 2", "Sensor 
 static const char languValues[][STRING_LEN] = {"0", "1"};
 static const char languNames[][STRING_LEN] = {"German", "English"};
 IotWebConf iotWebConf("Zirkulationspumpe", &dnsServer, &server, "", CONFIG_VERSION);
-IotWebConfParameterGroup mqttGroup = IotWebConfParameterGroup("mqtt", "MQTT configuration");
+IotWebConfParameterGroup mqttGroup = IotWebConfParameterGroup("mqtt", "MQTT");
 IotWebConfTextParameter mqttServerParam = IotWebConfTextParameter("server", "mqttServer", mqttServer, STRING_LEN);
 IotWebConfTextParameter mqttUserNameParam = IotWebConfTextParameter("user", "mqttUser", mqttUser, STRING_LEN);
 IotWebConfPasswordParameter mqttUserPasswordParam = IotWebConfPasswordParameter("password", "mqttPassword", mqttPassword, STRING_LEN);
@@ -141,21 +144,21 @@ IotWebConfTextParameter mqttPumpTopicParam = IotWebConfTextParameter("external p
 IotWebConfTextParameter mqttPumpValueParam = IotWebConfTextParameter("external pump start Value", "mqttPumpValue", mqttPumpValue, STRING_LEN, "");
 IotWebConfTextParameter mqttThermalDesinfectionTopicParam = IotWebConfTextParameter("thermal desinfection topic", "mqttThermalDesinfectionTopic", mqttThermalDesinfectionTopic, STRING_LEN, "ht3/hometop/ht/dhw_thermal_desinfection");
 IotWebConfTextParameter mqttThermalDesinfectionValueParam = IotWebConfTextParameter("thermal desinfection Value", "mqttThermalDesinfectionValue", mqttThermalDesinfectionValue, STRING_LEN, "1");
-IotWebConfParameterGroup ntpGroup = IotWebConfParameterGroup("ntp", "NTP configuration");
+IotWebConfParameterGroup ntpGroup = IotWebConfParameterGroup("ntp", "NTP");
 IotWebConfTextParameter ntpServerParam = IotWebConfTextParameter("server", "ntpServer", ntpServer, STRING_LEN, "de.pool.ntp.org");
 IotWebConfTextParameter ntpTimezoneParam = IotWebConfTextParameter("timezone", "ntpTimezone", ntpTimezone, STRING_LEN, "CET-1CEST,M3.5.0/02,M10.5.0/03");
-IotWebConfParameterGroup tempGroup = IotWebConfParameterGroup("temp", "Temperature configuration");
+IotWebConfParameterGroup tempGroup = IotWebConfParameterGroup("temp", "temperature");
 iotwebconf::SelectTParameter<STRING_LEN> tempOutParam =
     iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempOutParam").label("Out").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("1").build();
 iotwebconf::SelectTParameter<STRING_LEN> tempRetParam =
     iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempRetParam").label("Return").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("2").build();
 iotwebconf::SelectTParameter<STRING_LEN> tempIntParam =
     iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempIntParam").label("Internal").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("3").build();
-iotwebconf::FloatTParameter tempRetDiffParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("tempRetDiffParam").label("Return Off Diff").defaultValue(10.0).step(0.5).placeholder("e.g. 23.4").build();
-iotwebconf::FloatTParameter tempTriggerParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("tempTriggerParam").label("Temperature Trigger").defaultValue(0.125).step(0.0625).placeholder("e.g. 0.12").build();
+iotwebconf::FloatTParameter tempRetDiffParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("tempRetDiffParam").label("return off diff.").defaultValue(10.0).step(0.5).placeholder("e.g. 23.4").build();
+iotwebconf::FloatTParameter tempTriggerParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("tempTriggerParam").label("temperature trigger").defaultValue(0.125).step(0.0625).placeholder("e.g. 0.12").build();
 IotWebConfParameterGroup miscGroup = IotWebConfParameterGroup("misc", "misc.");
 iotwebconf::SelectTParameter<STRING_LEN> languParam =
-    iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("languParam").label("Language").optionValues((const char *)languValues).optionNames((const char *)languNames).optionCount(sizeof(languValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("0").build();
+    iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("languParam").label("language").optionValues((const char *)languValues).optionNames((const char *)languNames).optionCount(sizeof(languValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("0").build();
 
 
 
@@ -287,7 +290,9 @@ void handleRoot()
   s += "<p><h3>Pump</h3>";
   if (mqttHeaterStatus)
   {
-    if (pumpRunning)
+    if (mqttThermalDesinfection)
+      s += "desinfection";
+    else if (pumpRunning)
       s += "running";
     else
       s += "stopped";
@@ -303,12 +308,12 @@ void handleRoot()
   }
   uptime::calculateUptime();
   sprintf(tempStr, "%04u Tage %02u:%02u:%02u", uptime::getDays(), uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
-  s += "<p>Uptime: " + String(tempStr);
-  s += "<p>Last reset: " + verbose_print_reset_reason(esp_reset_reason());
+  s += "<p>uptime: " + String(tempStr);
+  s += "<p>last reset: " + verbose_print_reset_reason(esp_reset_reason());
   if (checkCoreDump())
-    s += "<p>Core Dump found";
+    s += "<p>core dump found";
   else
-    s += "<p>No Core Dump found";
+    s += "<p>no core dump found";
   s += "</fieldset>";
 
   s += "<p>Go to <a href='config'>Configuration</a>";
@@ -392,11 +397,15 @@ void onMqttConnect(bool sessionPresent)
   }
   if (strlen(mqttPumpTopic) > 0)
   {
-    Serial.println(" -" + String(mqttPumpTopic) + "- ");
-    // Serial.println(HEX(mqttPumpTopic));
     packetIdSub = mqttClient.subscribe(mqttPumpTopic, 2);
     Serial.print("Subscribed to topic: ");
     Serial.println(String(mqttPumpTopic) + " - " + String(packetIdSub));
+  }
+  if (strlen(mqttThermalDesinfectionTopic) > 0)
+  {
+    packetIdSub = mqttClient.subscribe(mqttThermalDesinfectionTopic, 2);
+    Serial.print("Subscribed to topic: ");
+    Serial.println(String(mqttThermalDesinfectionTopic) + " - " + String(packetIdSub));
   }
   digitalWrite(LED_BUILTIN, HIGH);
   mqttSendTopics(true);
@@ -479,7 +488,7 @@ void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties 
   {
     Serial.print("mqtt thermal desinfection: ");
     Serial.println(new_payload);
-    mqttPump = (strcmp(mqttThermalDesinfectionValue, new_payload) == 0);
+    mqttThermalDesinfection = (strcmp(mqttThermalDesinfectionValue, new_payload) == 0);
   }
   else if (strcmp(topic, mqttHeaterStatusTopic) == 0)
   {
@@ -1001,7 +1010,12 @@ void check()
   else
   {
     getTemp();
-    if (!pumpManual)
+    if (mqttThermalDesinfection)
+    {
+      if (!pumpRunning)
+        pumpOn();
+    }
+    else if (!pumpManual)
     {
       float temperatur_delta = 0.0;
       if (++checkCnt >= 5)
