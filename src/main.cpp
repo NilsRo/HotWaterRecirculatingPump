@@ -80,6 +80,7 @@ bool needReset = false;
 #define MQTT_PUB_TEMP_INT "Tint"
 #define MQTT_PUB_PUMP "dhw_pump_circulation"
 #define MQTT_PUB_INFO "info"
+#define MQTT_PUB_STATUS "status"
 AsyncMqttClient mqttClient;
 String mqttDisconnectReason;
 char mqttServer[STRING_LEN];
@@ -93,6 +94,7 @@ char mqttPumpTopic[STRING_LEN];
 char mqttPumpValue[STRING_LEN];
 bool mqttPump = false;
 bool mqttPumpRunning = false;
+String mqttStatus = "";
 char mqttThermalDesinfectionTopic[STRING_LEN];
 char mqttThermalDesinfectionValue[STRING_LEN];
 bool mqttThermalDesinfection = false;
@@ -165,6 +167,12 @@ int mod(int x, int y)
 {
   return x < 0 ? ((x + 1) % y) + y - 1 : x % y;
 }
+
+// Necessary forward declarations
+String updateStatus();
+void mqttSendTopics(bool mqttInit = false);
+//--
+
 
 String verbose_print_reset_reason(esp_reset_reason_t reason)
 {
@@ -286,18 +294,12 @@ void handleRoot()
 
   s += "<fieldset id=\"status\">";
   s += "<legend>Status</legend>";
-  s += "<p><h3>Pump</h3>";
-  if (mqttHeaterStatus)
-  {
-    if (mqttThermalDesinfection)
-      s += "desinfection";
-    else if (pumpRunning)
-      s += "running";
-    else
-      s += "stopped";
-  }
+  s += "<p>Status: ";
+  s += updateStatus();
+  if (pumpRunning)
+    s += "<p>Pump: running";
   else
-    s += "heater off";
+    s += "<p>Pump: stopped";
   s += "<p><h3>" + String(nils_length(pump)) + " Last pump actions</h3>";
   for (int i = 0; i < nils_length(pump); i++)
   { // display last pumpOn Events in right order
@@ -347,10 +349,6 @@ bool formValidator(iotwebconf::WebRequestWrapper *webRequestWrapper)
 }
 
 //-- SECTION: connection handling
-// Necessary forward declarations
-void mqttSendTopics(bool mqttInit = false);
-//--
-
 void setTimezone(String timezone)
 {
   Serial.printf("  Setting Timezone to %s\n", ntpTimezone);
@@ -544,9 +542,27 @@ void mqttSendTopics(bool mqttInit)
     else
       mqttPublish(MQTT_PUB_PUMP, "0");
   }
-
+  if (updateStatus() != mqttStatus || mqttInit)
+  {
+    mqttStatus = updateStatus();
+    mqttPublish(MQTT_PUB_STATUS, mqttStatus.c_str());
+  }
   if (mqttInit)
     mqttPublishUptime();
+}
+
+String updateStatus()
+{
+  String status;
+  if (mqttThermalDesinfection)
+    status = "desinfection";
+  if (pumpManual)
+    status = "manual";
+  else if (mqttHeaterStatus)
+    status = "heater on";
+  else
+    status = "heater off";
+  return status;
 }
 
 void checkSensors()
