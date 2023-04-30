@@ -161,18 +161,16 @@ IotWebConfParameterGroup miscGroup = IotWebConfParameterGroup("misc", "misc.");
 iotwebconf::SelectTParameter<STRING_LEN> languParam =
     iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("languParam").label("language").optionValues((const char *)languValues).optionNames((const char *)languNames).optionCount(sizeof(languValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("0").build();
 
-
-
+// -- SECTION: Common functions
 int mod(int x, int y)
 {
   return x < 0 ? ((x + 1) % y) + y - 1 : x % y;
 }
 
 // Necessary forward declarations
-String updateStatus();
+String getStatus();
 void mqttSendTopics(bool mqttInit = false);
 //--
-
 
 String verbose_print_reset_reason(esp_reset_reason_t reason)
 {
@@ -295,7 +293,7 @@ void handleRoot()
   s += "<fieldset id=\"status\">";
   s += "<legend>Status</legend>";
   s += "<p>Status: ";
-  s += updateStatus();
+  s += getStatus();
   if (pumpRunning)
     s += "<p>Pump: running";
   else
@@ -542,21 +540,23 @@ void mqttSendTopics(bool mqttInit)
     else
       mqttPublish(MQTT_PUB_PUMP, "0");
   }
-  if (updateStatus() != mqttStatus || mqttInit)
+  if (getStatus() != mqttStatus || mqttInit)
   {
-    mqttStatus = updateStatus();
+    mqttStatus = getStatus();
     mqttPublish(MQTT_PUB_STATUS, mqttStatus.c_str());
   }
   if (mqttInit)
     mqttPublishUptime();
 }
 
-String updateStatus()
+String getStatus()
 {
   String status;
-  if (mqttThermalDesinfection)
+  if (sensorError)
+    status = "emergency";
+  else if (mqttThermalDesinfection)
     status = "desinfection";
-  if (pumpManual)
+  else if (pumpManual)
     status = "manual";
   else if (mqttHeaterStatus)
     status = "heater on";
