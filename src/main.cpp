@@ -148,13 +148,13 @@ IotWebConfTextParameter mqttThermalDesinfectionValueParam = IotWebConfTextParame
 IotWebConfParameterGroup ntpGroup = IotWebConfParameterGroup("ntp", "NTP");
 IotWebConfTextParameter ntpServerParam = IotWebConfTextParameter("server", "ntpServer", ntpServer, STRING_LEN, "de.pool.ntp.org");
 IotWebConfTextParameter ntpTimezoneParam = IotWebConfTextParameter("timezone", "ntpTimezone", ntpTimezone, STRING_LEN, "CET-1CEST,M3.5.0/02,M10.5.0/03");
-IotWebConfParameterGroup tempGroup = IotWebConfParameterGroup("temp", "temperature");
+IotWebConfParameterGroup tempGroup = IotWebConfParameterGroup("temp", "Temperature");
 iotwebconf::SelectTParameter<STRING_LEN> tempOutParam =
-    iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempOutParam").label("Out").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("1").build();
+    iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempOutParam").label("out").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("1").build();
 iotwebconf::SelectTParameter<STRING_LEN> tempRetParam =
-    iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempRetParam").label("Return").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("2").build();
+    iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempRetParam").label("return").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("2").build();
 iotwebconf::SelectTParameter<STRING_LEN> tempIntParam =
-    iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempIntParam").label("Internal").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("3").build();
+    iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempIntParam").label("internal").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("3").build();
 iotwebconf::FloatTParameter tempRetDiffParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("tempRetDiffParam").label("return off diff.").defaultValue(10.0).step(0.5).placeholder("e.g. 23.4").build();
 iotwebconf::FloatTParameter tempTriggerParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("tempTriggerParam").label("temperature trigger").defaultValue(0.125).step(0.0625).placeholder("e.g. 0.12").build();
 IotWebConfParameterGroup miscGroup = IotWebConfParameterGroup("misc", "misc.");
@@ -292,12 +292,12 @@ void handleRoot()
 
   s += "<fieldset id=\"status\">";
   s += "<legend>Status</legend>";
-  s += "<p>Status: ";
+  s += "<p>status: ";
   s += getStatus();
   if (pumpRunning)
-    s += "<p>Pump: running";
+    s += "<p>pump: running";
   else
-    s += "<p>Pump: stopped";
+    s += "<p>pump: stopped";
   s += "<p><h3>" + String(nils_length(pump)) + " Last pump actions</h3>";
   for (int i = 0; i < nils_length(pump); i++)
   { // display last pumpOn Events in right order
@@ -559,9 +559,9 @@ String getStatus()
   else if (pumpManual)
     status = "manual";
   else if (mqttHeaterStatus)
-    status = "heater on";
+    status = "auto on";
   else
-    status = "heater off";
+    status = "auto off";
   return status;
 }
 
@@ -1040,7 +1040,7 @@ void check()
       temperatur_delta = t[checkCnt] - t[cnt_alt]; // Difference to 5 sec before
       if (!pumpRunning)
       {
-        if (((temperatur_delta >= tempTriggerParam.value() || mqttPump) && (300000 < millis() - pumpBlock || pumpFirstCall) && (mqttHeaterStatus || !mqttClient.connected())) || 86400000 < millis() - pumpStartedAt)
+        if ((((temperatur_delta >= tempTriggerParam.value() && (mqttHeaterStatus || !mqttClient.connected())) || mqttPump) && (300000 < millis() - pumpBlock || pumpFirstCall)) || 86400000 < millis() - pumpStartedAt)
         { // smallest temp change is 0,12°C,
           Serial.print("Temperature Delta: ");
           Serial.println(temperatur_delta);
