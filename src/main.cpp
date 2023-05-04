@@ -169,6 +169,8 @@ int mod(int x, int y)
 
 // Necessary forward declarations
 String getStatus();
+String getStatusJson();
+
 void mqttSendTopics(bool mqttInit = false);
 //--
 
@@ -540,9 +542,9 @@ void mqttSendTopics(bool mqttInit)
     else
       mqttPublish(MQTT_PUB_PUMP, "0");
   }
-  if (getStatus() != mqttStatus || mqttInit)
+  if (getStatusJson() != mqttStatus || mqttInit)
   {
-    mqttStatus = getStatus();
+    mqttStatus = getStatusJson();
     mqttPublish(MQTT_PUB_STATUS, mqttStatus.c_str());
   }
   if (mqttInit)
@@ -559,10 +561,35 @@ String getStatus()
   else if (pumpManual)
     status = "manual";
   else if (mqttHeaterStatus)
-    status = "auto on";
+    status = "heater on";
   else
-    status = "auto off";
+    status = "heater off";
   return status;
+}
+
+String getStatusJson()
+{
+  const size_t CAPACITY = JSON_OBJECT_SIZE(2);
+  StaticJsonDocument<CAPACITY> doc;
+  JsonObject object = doc.to<JsonObject>();
+  String jsonString;
+
+  if (pumpManual)
+    object["mode"] = "manual";
+  else
+  {
+    object["mode"] = "auto";
+    if (sensorError)
+      object["state"] = "emergency";
+    else if (mqttThermalDesinfection)
+      object["state"] = "desinfection";
+    else if (mqttHeaterStatus)
+      object["state"] = "heater on";
+    else
+      object["state"] = "heater off";
+  }
+  serializeJson(object, jsonString);
+  return jsonString;
 }
 
 void checkSensors()

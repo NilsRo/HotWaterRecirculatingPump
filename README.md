@@ -41,12 +41,16 @@ On first start the thing will open an Access Point named "Zirkulationspumpe" to 
       * "ww/ht/dhw_Treturn": return temperature of the warm water circulation
       * "ww/ht/Tint": system internal temperature
       * "ww/ht/dhw_pump_circulation": pump is running or not
-      * "ww/ht/status": status of the system showing the actual mode
-        * auto on - automatic mode
-        * auto off - pump can be triggered but no automatic handling, useful for holidays or during the night
-        * desinfection - running until desinfection is finished. Will not stop directly, it waits until the water is gone though the whole pipe
-        * manual - control the pump via the button, 24h trigger to clean the pipes will still be triggered for security reasons
-        * emergency - some sort of problem detected like with DS18B20 that the pump will start regularly by a timer.
+      * "ww/ht/status": status of the system showing the actual mode as Json
+        * mode 
+          * auto - automatic mode
+          * manual - control the pump via the button. The 24h timer to clean the pipes is still running.
+        * state
+          * heater on - pump will be started if hot water is requested
+          * heater off - pump can be triggered manually but no automatic handling, useful for holidays or during the night
+          * desinfection - running until desinfection is finished. Will not stop directly, it waits until the water is gone though the whole pipe
+        for security reasons
+          * emergency - some sort of problem detected like with DS18B20 that the pump will start regularly by a timer.
       * "ww/ht/info": system information as text
    2. subscribe to heater topics
       * heater status topic (e.g. ht3/hometop/ht/hc1_Tniveau): if the value is matched the system switches to automatic mode. If it is not matched the pump is off and reacts on desinfection and manual starts only.
