@@ -308,7 +308,7 @@ void handleRoot()
   uptime::calculateUptime();
   sprintf(tempStr, "%04u Tage %02u:%02u:%02u", uptime::getDays(), uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
   s += "<p>uptime: " + String(tempStr);
-  s += "<p>last reset: " + verbose_print_reset_reason(esp_reset_reason());
+  s += "<p>last reset reason: " + verbose_print_reset_reason(esp_reset_reason());
   if (checkCoreDump())
     s += "<p>core dump found";
   else
