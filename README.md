@@ -41,12 +41,21 @@ On first start the thing will open an Access Point named "Zirkulationspumpe" to 
       * "ww/ht/dhw_Treturn": return temperature of the warm water circulation
       * "ww/ht/Tint": system internal temperature
       * "ww/ht/dhw_pump_circulation": pump is running or not
-      * "ww/ht/status": status of the system showing the actual mode (heater on, heater off, desinfection, manual, emergency)
+      * "ww/ht/status": status of the system showing the actual mode as Json
+        * mode 
+          * auto - automatic mode
+          * manual - control the pump via the button. The 24h timer to clean the pipes is still running.
+        * state
+          * heater on - pump will be started if hot water is requested
+          * heater off - pump can be triggered manually but no automatic handling, useful for holidays or during the night
+          * desinfection - running until desinfection is finished. Will not stop directly, it waits until the water is gone though the whole pipe
+        for security reasons
+          * emergency - some sort of problem detected like with DS18B20 that the pump will start regularly by a timer.
       * "ww/ht/info": system information as text
    2. subscribe to heater topics
-      * heater status topic (e.g. ht3/hometop/ht/hc1_Tniveau): if the value is matched the pump automation is active. If it is not matched the pump is off and reacts on desinfection and manual starts only
+      * heater status topic (e.g. ht3/hometop/ht/hc1_Tniveau): if the value is matched the system switches to automatic mode. If it is not matched the pump is off and reacts on desinfection and manual starts only.
       * external pump start topic (e.g. ht3/hometop/ht/dhw_pump_circulation):  The event is triggered if the message contains the value set in the configuration. The pump will swtched off if the desired return temperature is reached. Could be used to have a dump switch with HT3 and avoids buying a second IPM module for water pump (automatic mode should be disabled) or much better you can trigger the pump from your smart home or something more advanced.
-      * thermal desinfection topic (e.g. ht3/hometop/ht/dhw_thermal_desinfection): if the value is matched the pump will switch on infinitly until another value is received on this topic. This can be used for desinfection topics.
+      * thermal desinfection topic (e.g. ht3/hometop/ht/dhw_thermal_desinfection): if the value is matched the pump will switch on infinitly until another value is received on this topic. This can be used for desinfection topics. If desinfection is switched off the pump will still run until the necessary temperature is reached on the return pipe to guarantee the desinfection of the whole pipe.
 3. NTP configuration to get RTC infos for logging (default is fine for german timezone)
 4. Temperature configuration to map DS18B20 sensors detected
 5. Define your return temperature to switch off when the water is gone through the whole circulation pipe.
