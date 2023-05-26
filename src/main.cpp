@@ -258,7 +258,7 @@ String readCoreDump()
   }
   else
   {
-    return "esp_core_dump_image_get() FAIL";
+    return "esp_core_dump_image_get() FAIL";    
   }
 }
 
@@ -286,15 +286,32 @@ void startCrash()
   s += iotWebConf.getHtmlFormatProvider()->getStyle();
   s += "<title>Warmwater Recirculation Pump</title>";
   s += iotWebConf.getHtmlFormatProvider()->getHeadEnd();
-  s += "Crashing in 60 seconds...!";
+  s += "Crashing in 5 seconds...!";
   s += iotWebConf.getHtmlFormatProvider()->getEnd();
   server.send(200, "text/html", s);
-  startCrashTimer(60);
+  startCrashTimer(5);
 }
 
-void handleCoredump()
+void handleCoreDump()
 {
+  server.sendHeader("Content-Type", "application/octet-stream");
+  server.sendHeader("Content-Disposition", "attachment; filename=coredump.bin");
+  server.sendHeader("Connection", "close");
   server.send(200, "application/octet-stream", readCoreDump());
+}
+
+void handleDeleteCoreDump()
+{
+  String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
+  s += iotWebConf.getHtmlFormatProvider()->getStyle();
+  s += "<title>Warmwater Recirculation Pump</title>";
+  s += iotWebConf.getHtmlFormatProvider()->getHeadEnd();
+  if (esp_core_dump_image_erase() == ESP_OK)
+    s += "Core dump deleted";
+  else
+    s += "No core dump found!";
+  s += iotWebConf.getHtmlFormatProvider()->getEnd();
+  server.send(200, "text/html", s);
 }
 
 
@@ -400,7 +417,8 @@ void handleRoot()
   s += "<p>uptime: " + String(tempStr);
   s += "<p>last reset reason: " + verbose_print_reset_reason(esp_reset_reason());
   if (checkCoreDump())
-    s += "<p><a href=/coredump>core dump found</a>";
+    s += "<p><a href=/coredump>core dump found</a> <a href=/deletecoredump>Delete core dump</a>";
+    s += "<button type="button" onclick="javascript:history.back()">Back</button>";
   else
     s += "<p>no core dump found";
   s += "</fieldset>";
@@ -1283,7 +1301,8 @@ void setup()
             { iotWebConf.handleConfig(); });
   server.onNotFound([]()
                     { iotWebConf.handleNotFound(); });
-  server.on("/coredump", handleCoredump);
+  server.on("/coredump", handleCoreDump);
+  server.on("/deletecoredump", handleDeleteCoreDump);
   server.on("/crash", startCrash);
   Serial.println("Wifi manager ready.");
 
