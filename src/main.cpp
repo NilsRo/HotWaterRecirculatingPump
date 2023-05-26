@@ -174,6 +174,7 @@ String getStatusJson();
 void mqttSendTopics(bool mqttInit = false);
 //--
 
+// -- SECTION: Wifi Manager
 String verbose_print_reset_reason(esp_reset_reason_t reason)
 {
   switch (reason)
@@ -209,6 +210,93 @@ bool checkCoreDump()
   else
     return false;
 }
+
+String readCoreDump()
+{
+  size_t size = 0;
+  size_t address = 0;
+  if (esp_core_dump_image_get(&address, &size) == ESP_OK)
+  {
+    const esp_partition_t *pt = NULL;
+    pt = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, "coredump");
+
+    if (pt != NULL)
+    {
+      uint8_t bf[256];
+      char str_dst[640];
+      int16_t toRead;
+      String return_str;
+
+      for (int16_t i = 0; i < (size / 256) + 1; i++)
+      {
+        strcpy(str_dst, "");
+        toRead = (size - i * 256) > 256 ? 256 : (size - i * 256);
+
+        esp_err_t er = esp_partition_read(pt, i * 256, bf, toRead);
+        if (er != ESP_OK)
+        {
+          Serial.printf("FAIL [%x]\n",er);
+          break;
+        }
+
+        for (int16_t j = 0; j < 256; j++)
+        {
+          char str_tmp[3];
+
+          sprintf(str_tmp, "%02x", bf[j]);
+          strcat(str_dst, str_tmp);
+        }
+
+        return_str += str_dst;
+      }
+      return return_str;
+    }
+    else
+    {
+      return "Partition NULL";
+    }
+  }
+  else
+  {
+    return "esp_core_dump_image_get() FAIL";
+  }
+}
+
+void crash_me_hard() 
+{
+	//provoke crash through writing to a nullpointer
+	volatile uint32_t* aPtr = (uint32_t*) 0x00000000;
+	*aPtr = 0x1234567; //goodnight
+}
+
+void startCrashTimer(int secs) 
+{
+  for(int i=0; i <= secs; i++) {
+		printf("Crashing in %d seconds..\n", secs - i);
+		vTaskDelay(1000 / portTICK_PERIOD_MS);
+	}
+	printf("Crashing..\n");
+	vTaskDelay(1000 / portTICK_PERIOD_MS);
+	crash_me_hard();
+}
+
+void startCrash()
+{
+  String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
+  s += iotWebConf.getHtmlFormatProvider()->getStyle();
+  s += "<title>Warmwater Recirculation Pump</title>";
+  s += iotWebConf.getHtmlFormatProvider()->getHeadEnd();
+  s += "Crashing in 60 seconds...!";
+  s += iotWebConf.getHtmlFormatProvider()->getEnd();
+  server.send(200, "text/html", s);
+  startCrashTimer(60);
+}
+
+void handleCoredump()
+{
+  server.send(200, "application/octet-stream", readCoreDump());
+}
+
 
 // -- SECTION: Wifi Manager
 void handleRoot()
@@ -312,7 +400,7 @@ void handleRoot()
   s += "<p>uptime: " + String(tempStr);
   s += "<p>last reset reason: " + verbose_print_reset_reason(esp_reset_reason());
   if (checkCoreDump())
-    s += "<p>core dump found";
+    s += "<p><a href=/coredump>core dump found</a>";
   else
     s += "<p>no core dump found";
   s += "</fieldset>";
@@ -1105,92 +1193,6 @@ void onMin10Timer()
   mqttPublishUptime();
 }
 
-void readCoreDump()
-{
-  size_t size = 0;
-  size_t address = 0;
-  if (esp_core_dump_image_get(&address, &size) == ESP_OK)
-  {
-    const esp_partition_t *pt = NULL;
-    pt = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, "coredump");
-
-    if (pt != NULL)
-    {
-      uint8_t bf[256];
-      char str_dst[640];
-      int16_t toRead;
-
-      for (int16_t i = 0; i < (size / 256) + 1; i++)
-      {
-        strcpy(str_dst, "");
-        toRead = (size - i * 256) > 256 ? 256 : (size - i * 256);
-
-        esp_err_t er = esp_partition_read(pt, i * 256, bf, toRead);
-        if (er != ESP_OK)
-        {
-          Serial.printf("FAIL [%x]\n",er);
-          //ESP_LOGE("ESP32", "FAIL [%x]", er);
-          break;
-        }
-
-        for (int16_t j = 0; j < 256; j++)
-        {
-          char str_tmp[3];
-
-          sprintf(str_tmp, "%02x", bf[j]);
-          strcat(str_dst, str_tmp);
-        }
-
-        printf("%s", str_dst);
-      }
-    }
-    else
-    {
-      Serial.println("Partition NULL");
-      //ESP_LOGE("ESP32", "Partition NULL");
-    }
-    // esp_core_dump_image_erase();
-  }
-  else
-  {
-    Serial.println("esp_core_dump_image_get() FAIL");
-    //ESP_LOGI("ESP32", "esp_core_dump_image_get() FAIL");
-  }
-}
-
-// esp_err_t esp_core_dump_image_erase()
-// {
-//     /* Find the partition that could potentially contain a (previous) core dump. */
-//     const esp_partition_t *core_part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA,
-//                                                                 ESP_PARTITION_SUBTYPE_DATA_COREDUMP,
-//                                                                 "coredump");
-//     if (!core_part) {
-//         Serial.println("No core dump partition found!");
-//         return ESP_ERR_NOT_FOUND;
-//     }
-//     if (core_part->size < sizeof(uint32_t)) {
-//         Serial.println("Too small core dump partition!");
-//         return ESP_ERR_INVALID_SIZE;
-//     }
-
-//     esp_err_t err = ESP_OK;
-//     err = esp_partition_erase_range(core_part, 0, core_part->size);
-//     if (err != ESP_OK) {
-//         Serial.printf("Failed to erase core dump partition (%d)!\n", err);
-//         return err;
-//     }
-
-//     // on encrypted flash esp_partition_erase_range will leave encrypted
-//     // garbage instead of 0xFFFFFFFF so overwriting again to safely signalize
-//     // deleted coredumps
-//     const uint32_t invalid_size = 0xFFFFFFFF;
-//     err = esp_partition_write(core_part, 0, &invalid_size, sizeof(invalid_size));
-//     if (err != ESP_OK) {
-//         Serial.printf("Failed to write core dump partition size (%d)!\n", err);
-//     }
-
-//     return err;
-// }
 
 void setup()
 {
@@ -1281,6 +1283,8 @@ void setup()
             { iotWebConf.handleConfig(); });
   server.onNotFound([]()
                     { iotWebConf.handleNotFound(); });
+  server.on("/coredump", handleCoredump);
+  server.on("/crash", startCrash);
   Serial.println("Wifi manager ready.");
 
   mqttClient.onConnect(onMqttConnect);
