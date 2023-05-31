@@ -310,6 +310,7 @@ void handleDeleteCoreDump()
     s += "Core dump deleted";
   else
     s += "No core dump found!";
+  s += "<button type=\"button\" onclick=\"javascript:history.back()\">Back</button>";
   s += iotWebConf.getHtmlFormatProvider()->getEnd();
   server.send(200, "text/html", s);
 }
@@ -418,7 +419,6 @@ void handleRoot()
   s += "<p>last reset reason: " + verbose_print_reset_reason(esp_reset_reason());
   if (checkCoreDump())
     s += "<p><a href=/coredump>core dump found</a> <a href=/deletecoredump>Delete core dump</a>";
-    s += "<button type="button" onclick="javascript:history.back()">Back</button>";
   else
     s += "<p>no core dump found";
   s += "</fieldset>";
