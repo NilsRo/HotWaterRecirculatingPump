@@ -1369,7 +1369,6 @@ void setup()
     display.drawString(display.getWidth() / 2, display.getHeight() / 2, "OTA Failed"); });
   ArduinoOTA.begin();
   Serial.println("OTA Ready");
-  Serial.println(WiFi.localIP());
 
   // Timers
   secTimer.attach(1, onSecTimer);
