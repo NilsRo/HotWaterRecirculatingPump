@@ -83,6 +83,7 @@ bool needReset = false;
 #define MQTT_PUB_STATUS "status"
 AsyncMqttClient mqttClient;
 String mqttDisconnectReason;
+char mqttDisconnectTime[40];
 char mqttServer[STRING_LEN];
 char mqttUser[STRING_LEN];
 char mqttPassword[STRING_LEN];
@@ -352,6 +353,9 @@ void handleRoot()
   s += "<td>last disconnect reason: </td>";
   s += "<td>" + mqttDisconnectReason + "</td>";
   s += "</tr><tr>";
+  s += "<td>last disconnect: </td>";
+  s += "<td>" + String(mqttDisconnectTime) + "</td>";
+  s += "</tr><tr>";
   s += "</tr></table></fieldset>";
 
   s += "<fieldset id=" + String(ntpGroup.getId()) + ">";
@@ -539,6 +543,8 @@ void onMqttDisconnect(AsyncMqttClientDisconnectReason reason)
     mqttDisconnectReason = "MQTT_NOT_AUTHORIZED";
     break;
   }
+  strftime(mqttDisconnectTime, 40, "%d.%m.%Y %T", &localTime);
+
   Serial.printf(" [%8u] Disconnected from the broker reason = %s\n", millis(), mqttDisconnectReason.c_str());
   Serial.printf(" [%8u] Reconnecting to MQTT..\n", millis());
   digitalWrite(LED_BUILTIN, LOW);
