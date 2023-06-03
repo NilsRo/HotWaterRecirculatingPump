@@ -310,7 +310,7 @@ void handleDeleteCoreDump()
     s += "Core dump deleted";
   else
     s += "No core dump found!";
-  s += "<button type=\"button\" onclick=\"javascript:history.back()\">Back</button>";
+  s += "<p><button type=\"button\" onclick=\"javascript:history.back()\">Back</button>";
   s += iotWebConf.getHtmlFormatProvider()->getEnd();
   server.send(200, "text/html", s);
 }
@@ -1317,6 +1317,7 @@ void setup()
   if (mqttUser != "")
     mqttClient.setCredentials(mqttUser, mqttPassword);
   mqttClient.setServer(mqttServer, MQTT_PORT);
+  Serial.println("MQTT ready");
 
   sensors.begin();
   // locate devices on the bus
@@ -1331,10 +1332,13 @@ void setup()
   if (!sensors.getAddress(sensorInt_id, atol(tempIntParam.value())))
     sensorDetectionError = true;
   checkSensors();
+  Serial.println("Sensors ready");
 
   // configure the timezone
   configTime(0, 0, ntpServer);
   setTimezone(ntpTimezone);
+  Serial.println("NTP ready");
+
 
   // Init OTA function
   ArduinoOTA.onStart([]()
