@@ -1338,6 +1338,7 @@ void setup()
   ArduinoOTA.onStart([]()
                      {
     Serial.println("Start OTA");
+    display.displayOn();
     display.clear();
     display.setFont(ArialMT_Plain_10);
     display.setTextAlignment(TEXT_ALIGN_CENTER_BOTH);
