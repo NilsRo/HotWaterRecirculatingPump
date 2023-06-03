@@ -477,6 +477,7 @@ void onWifiConnected()
   Serial.println(WiFi.localIP());
   connectToMqtt();
   timeClient.begin();
+  ArduinoOTA.begin();
 }
 
 void onWifiDisconnect(WiFiEvent_t event, WiFiEventInfo_t info)
@@ -484,6 +485,7 @@ void onWifiDisconnect(WiFiEvent_t event, WiFiEventInfo_t info)
   Serial.println("Disconnected from Wi-Fi.");
   mqttReconnectTimer.detach(); // ensure we don't reconnect to MQTT while reconnecting to Wi-Fi
   timeClient.end();
+  ArduinoOTA.end();
 }
 
 void onMqttConnect(bool sessionPresent)
@@ -1368,7 +1370,6 @@ void setup()
     display.clear();
     display.setFont(ArialMT_Plain_24);
     display.drawString(display.getWidth() / 2, display.getHeight() / 2, "OTA Failed"); });
-  ArduinoOTA.begin();
   Serial.println("OTA Ready");
 
   // Timers
