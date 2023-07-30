@@ -1235,7 +1235,7 @@ void check()
 }
 
 void onSecTimer()
-{
+{  
   updateTime();
   check();
 }
