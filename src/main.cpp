@@ -1235,7 +1235,7 @@ void check()
 }
 
 void onSecTimer()
-{  
+{
   updateTime();
   check();
 }
@@ -1321,15 +1321,15 @@ void setup()
     if (preferences.isKey("apPassword"))
       strncpy(iotWebConf.getApPasswordParameter()->valueBuffer, preferences.getString("apPassword").c_str(), iotWebConf.getApPasswordParameter()->getLength());
     else
-      String("AP Password not found for restauration.");
+      Serial.println("AP Password not found for restauration.");
     if (preferences.isKey("wifiSsid"))
       strncpy(iotWebConf.getWifiSsidParameter()->valueBuffer, preferences.getString("wifiSsid").c_str(), iotWebConf.getWifiSsidParameter()->getLength());
     else
-      String("WiFi SSID not found for restauration.");
+      Serial.println("WiFi SSID not found for restauration.");
     if (preferences.isKey("wifiPassword"))
       strncpy(iotWebConf.getWifiPasswordParameter()->valueBuffer, preferences.getString("wifiPassword").c_str(), iotWebConf.getWifiPasswordParameter()->getLength());
     else
-      String("WiFi Password not found for restauration.");
+      Serial.println("WiFi Password not found for restauration.");
     iotWebConf.saveConfig();
     iotWebConf.resetWifiAuthInfo();
   }
