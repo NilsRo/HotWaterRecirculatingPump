@@ -464,7 +464,8 @@ void handleRoot()
 
 void configSaved()
 {
-  preferences.putString("apPassword", String(iotWebConf.getApPasswordParameter()->valueBuffer));
+  if (iotWebConf.getApPasswordParameter()->getLength() > 0)
+    preferences.putString("apPassword", String(iotWebConf.getApPasswordParameter()->valueBuffer));
   preferences.putString("wifiSsid", String(iotWebConf.getWifiAuthInfo().ssid));
   preferences.putString("wifiPassword", String(iotWebConf.getWifiAuthInfo().password));
 
