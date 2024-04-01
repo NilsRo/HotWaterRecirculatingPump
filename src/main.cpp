@@ -646,7 +646,16 @@ void mqttPublish(const char *topic, const char *payload)
   std::string tempTopic;
   tempTopic.append(mqttTopicPath);
   tempTopic.append(topic);
-  mqttClient.publish(tempTopic.c_str(), 0, true, payload);
+  if (mqttClient.connected())
+  {
+    mqttClient.publish(tempTopic.c_str(), 0, true, payload);
+  }
+  else
+  {
+    Serial.print("mqtt message could not be send: ");
+    Serial.println(tempTopic.c_str());
+    Serial.println(payload);
+  }
 }
 //-- END SECTION: connection handling
 
