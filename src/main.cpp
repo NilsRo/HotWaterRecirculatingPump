@@ -20,7 +20,6 @@
 #include <langu.h>
 #include <esp_core_dump.h>
 
-
 #define STRING_LEN 128
 #define nils_length(x) ((sizeof(x) / sizeof(0 [x])) / ((size_t)(!(sizeof(x) % sizeof(0 [x])))))
 // #define nils_length( x ) ( sizeof(x) )
@@ -73,7 +72,7 @@ bool displayOn = true;
 bool needReset = false;
 
 // For a cloud MQTT broker, type the domain name
-//#define MQTT_HOST "example.com"
+// #define MQTT_HOST "example.com"
 #define MQTT_PORT 1883
 #define MQTT_PUB_TEMP_OUT "dhw_Tflow_measured"
 #define MQTT_PUB_TEMP_RET "dhw_Treturn"
@@ -83,6 +82,7 @@ bool needReset = false;
 #define MQTT_PUB_STATUS "status"
 AsyncMqttClient mqttClient;
 String mqttDisconnectReason;
+char mqttDisconnectTime[40];
 char mqttServer[STRING_LEN];
 char mqttUser[STRING_LEN];
 char mqttPassword[STRING_LEN];
@@ -99,7 +99,6 @@ char mqttThermalDesinfectionTopic[STRING_LEN];
 char mqttThermalDesinfectionValue[STRING_LEN];
 bool mqttThermalDesinfection = false;
 
-
 Ticker mqttReconnectTimer;
 Ticker secTimer;
 Ticker displayTimer;
@@ -110,11 +109,11 @@ WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP);
 char ntpServer[STRING_LEN];
 char ntpTimezone[STRING_LEN];
-char hostname[STRING_LEN];
 time_t now;
 struct tm localTime;
 
 IPAddress localIP;
+char hostname[STRING_LEN];
 unsigned long lastScan = 0;
 int networksFound;
 int networksPage = 0;
@@ -174,26 +173,65 @@ String getStatusJson();
 void mqttSendTopics(bool mqttInit = false);
 //--
 
+// -- SECTION: Core Dump
 String verbose_print_reset_reason(esp_reset_reason_t reason)
 {
   switch (reason)
   {
-    case ESP_RST_UNKNOWN  : return(" Reset reason can not be determined");
-    case ESP_RST_POWERON  : return("Reset due to power-on event");
-    case ESP_RST_EXT  : return("Reset by external pin (not applicable for ESP32)");
-    case ESP_RST_SW  : return("Software reset via esp_restart");
-    case ESP_RST_PANIC  : return("Software reset due to exception/panic");
-    case ESP_RST_INT_WDT  : return("Reset (software or hardware) due to interrupt watchdog");
-    case ESP_RST_TASK_WDT  : return("Reset due to task watchdog");
-    case ESP_RST_WDT  : return("Reset due to other watchdogs");
-    case ESP_RST_DEEPSLEEP : return("Reset after exiting deep sleep mode");
-    case ESP_RST_BROWNOUT : return("Brownout reset (software or hardware)");
-    case ESP_RST_SDIO : return("Reset over SDIO");
-    default : return("NO_MEAN");
+  case ESP_RST_UNKNOWN:
+    return (" Reset reason can not be determined");
+  case ESP_RST_POWERON:
+    return ("Reset due to power-on event");
+  case ESP_RST_EXT:
+    return ("Reset by external pin (not applicable for ESP32)");
+  case ESP_RST_SW:
+    return ("Software reset via esp_restart");
+  case ESP_RST_PANIC:
+    return ("Software reset due to exception/panic");
+  case ESP_RST_INT_WDT:
+    return ("Reset (software or hardware) due to interrupt watchdog");
+  case ESP_RST_TASK_WDT:
+    return ("Reset due to task watchdog");
+  case ESP_RST_WDT:
+    return ("Reset due to other watchdogs");
+  case ESP_RST_DEEPSLEEP:
+    return ("Reset after exiting deep sleep mode");
+  case ESP_RST_BROWNOUT:
+    return ("Brownout reset (software or hardware)");
+  case ESP_RST_SDIO:
+    return ("Reset over SDIO");
+  default:
+    return ("NO_MEAN");
   }
 }
 
-bool checkCoreDump()
+void initCoreDumpFlash()
+{
+  if (esp_core_dump_image_check() != ESP_OK)
+  {
+    esp_core_dump_image_erase();
+    Serial.println("Invalid core dump deleted!");
+  }
+}
+
+// bool checkCoreDump()
+// {
+//   size_t size = 0;
+//   size_t address = 0;
+//   if (esp_core_dump_image_get(&address, &size) == ESP_OK)
+//   {
+//     const esp_partition_t *pt = NULL;
+//     pt = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, "coredump");
+//     if (pt != NULL)
+//       return true;
+//     else
+//       return false;
+//   }
+//   else
+//     return false;
+// }
+
+String readCoreDump()
 {
   size_t size = 0;
   size_t address = 0;
@@ -201,13 +239,101 @@ bool checkCoreDump()
   {
     const esp_partition_t *pt = NULL;
     pt = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, "coredump");
+
     if (pt != NULL)
-      return true;
+    {
+      uint8_t bf[256];
+      char str_dst[640];
+      int16_t toRead;
+      String return_str;
+
+      for (int16_t i = 0; i < (size / 256) + 1; i++)
+      {
+        strcpy(str_dst, "");
+        toRead = (size - i * 256) > 256 ? 256 : (size - i * 256);
+
+        esp_err_t er = esp_partition_read(pt, i * 256, bf, toRead);
+        if (er != ESP_OK)
+        {
+          Serial.printf("FAIL [%x]\n", er);
+          break;
+        }
+
+        for (int16_t j = 0; j < 256; j++)
+        {
+          char str_tmp[3];
+
+          sprintf(str_tmp, "%02x", bf[j]);
+          strcat(str_dst, str_tmp);
+        }
+
+        return_str += str_dst;
+      }
+      return return_str;
+    }
     else
-      return false;
+    {
+      return "Partition NULL";
+    }
   }
   else
-    return false;
+  {
+    return "esp_core_dump_image_get() FAIL";
+  }
+}
+
+void crash_me_hard()
+{
+  // provoke crash through writing to a nullpointer
+  volatile uint32_t *aPtr = (uint32_t *)0x00000000;
+  *aPtr = 0x1234567; // goodnight
+}
+
+void startCrashTimer(int secs)
+{
+  for (int i = 0; i <= secs; i++)
+  {
+    printf("Crashing in %d seconds..\n", secs - i);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+  }
+  printf("Crashing..\n");
+  vTaskDelay(1000 / portTICK_PERIOD_MS);
+  crash_me_hard();
+}
+
+void startCrash()
+{
+  String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
+  s += iotWebConf.getHtmlFormatProvider()->getStyle();
+  s += "<title>Warmwater Recirculation Pump</title>";
+  s += iotWebConf.getHtmlFormatProvider()->getHeadEnd();
+  s += "Crashing in 5 seconds...!";
+  s += iotWebConf.getHtmlFormatProvider()->getEnd();
+  server.send(200, "text/html", s);
+  startCrashTimer(5);
+}
+
+void handleCoreDump()
+{
+  server.sendHeader("Content-Type", "application/octet-stream");
+  server.sendHeader("Content-Disposition", "attachment; filename=coredump.bin");
+  server.sendHeader("Connection", "close");
+  server.send(200, "application/octet-stream", readCoreDump());
+}
+
+void handleDeleteCoreDump()
+{
+  String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
+  s += iotWebConf.getHtmlFormatProvider()->getStyle();
+  s += "<title>Warmwater Recirculation Pump</title>";
+  s += iotWebConf.getHtmlFormatProvider()->getHeadEnd();
+  if (esp_core_dump_image_erase() == ESP_OK)
+    s += "Core dump deleted";
+  else
+    s += "No core dump found!";
+  s += "<p><button type=\"button\" onclick=\"javascript:history.back()\">Back</button>";
+  s += iotWebConf.getHtmlFormatProvider()->getEnd();
+  server.send(200, "text/html", s);
 }
 
 // -- SECTION: Wifi Manager
@@ -245,6 +371,9 @@ void handleRoot()
   s += "</tr><tr>";
   s += "<td>last disconnect reason: </td>";
   s += "<td>" + mqttDisconnectReason + "</td>";
+  s += "</tr><tr>";
+  s += "<td>last disconnect: </td>";
+  s += "<td>" + String(mqttDisconnectTime) + "</td>";
   s += "</tr><tr>";
   s += "</tr></table></fieldset>";
 
@@ -304,17 +433,28 @@ void handleRoot()
   for (int i = 0; i < nils_length(pump); i++)
   { // display last pumpOn Events in right order
     byte arrIndex = mod((((int)pumpCnt) - i), nils_length(pump));
-    sprintf(tempStr,"%02d", i + 1);
+    sprintf(tempStr, "%02d", i + 1);
     s += String(tempStr) + ": " + pump[arrIndex] + "<br>";
   }
   uptime::calculateUptime();
   sprintf(tempStr, "%04u Tage %02u:%02u:%02u", uptime::getDays(), uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
   s += "<p>uptime: " + String(tempStr);
   s += "<p>last reset reason: " + verbose_print_reset_reason(esp_reset_reason());
-  if (checkCoreDump())
-    s += "<p>core dump found";
-  else
-    s += "<p>no core dump found";
+  s += "<p>";
+  switch (esp_core_dump_image_check())
+  {
+  case ESP_OK:
+    s += "<a href=/coredump>core dump found</a> - <a href=/deletecoredump>delete core dump</a>";
+    break;
+  case ESP_ERR_NOT_FOUND:
+    s += "no core dump found";
+    break;
+  case ESP_ERR_INVALID_SIZE:
+    s += "core dump with invalid size - <a href=/deletecoredump>delete core dump</a>";
+    break;
+  case ESP_ERR_INVALID_CRC:
+    s += "core dump with invalid CRC - <a href=/deletecoredump>delete core dump</a>";
+  }
   s += "</fieldset>";
 
   s += "<p>Go to <a href='config'>Configuration</a>";
@@ -324,7 +464,8 @@ void handleRoot()
 
 void configSaved()
 {
-  preferences.putString("apPassword", String(iotWebConf.getApPasswordParameter()->valueBuffer));
+  if (iotWebConf.getApPasswordParameter()->getLength() > 0)
+    preferences.putString("apPassword", String(iotWebConf.getApPasswordParameter()->valueBuffer));
   preferences.putString("wifiSsid", String(iotWebConf.getWifiAuthInfo().ssid));
   preferences.putString("wifiPassword", String(iotWebConf.getWifiAuthInfo().password));
 
@@ -371,6 +512,7 @@ void onWifiConnected()
   Serial.println(WiFi.localIP());
   connectToMqtt();
   timeClient.begin();
+  ArduinoOTA.begin();
 }
 
 void onWifiDisconnect(WiFiEvent_t event, WiFiEventInfo_t info)
@@ -378,6 +520,8 @@ void onWifiDisconnect(WiFiEvent_t event, WiFiEventInfo_t info)
   Serial.println("Disconnected from Wi-Fi.");
   mqttReconnectTimer.detach(); // ensure we don't reconnect to MQTT while reconnecting to Wi-Fi
   timeClient.end();
+  // ArduinoOTA.end();  TODO: Fehler untersuchen, dumped.
+  Serial.println("TCP services stopped.");
 }
 
 void onMqttConnect(bool sessionPresent)
@@ -431,12 +575,14 @@ void onMqttDisconnect(AsyncMqttClientDisconnectReason reason)
     mqttDisconnectReason = "MQTT_NOT_AUTHORIZED";
     break;
   }
+  strftime(mqttDisconnectTime, 40, "%d.%m.%Y %T", &localTime);
+
   Serial.printf(" [%8u] Disconnected from the broker reason = %s\n", millis(), mqttDisconnectReason.c_str());
-  Serial.printf(" [%8u] Reconnecting to MQTT..\n", millis());
   digitalWrite(LED_BUILTIN, LOW);
 
   if (WiFi.isConnected())
   {
+    Serial.printf(" [%8u] Reconnecting to MQTT..\n", millis());
     mqttReconnectTimer.once(5, connectToMqtt);
   }
 }
@@ -495,12 +641,21 @@ void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties 
   }
 }
 
-void mqttPublish(const char* topic, const char* payload)
+void mqttPublish(const char *topic, const char *payload)
 {
   std::string tempTopic;
   tempTopic.append(mqttTopicPath);
   tempTopic.append(topic);
-  mqttClient.publish(tempTopic.c_str(), 0, true, payload);
+  if (mqttClient.connected())
+  {
+    mqttClient.publish(tempTopic.c_str(), 0, true, payload);
+  }
+  else
+  {
+    Serial.print("mqtt message could not be send: ");
+    Serial.println(tempTopic.c_str());
+    Serial.println(payload);
+  }
 }
 //-- END SECTION: connection handling
 
@@ -1105,97 +1260,11 @@ void onMin10Timer()
   mqttPublishUptime();
 }
 
-void readCoreDump()
-{
-  size_t size = 0;
-  size_t address = 0;
-  if (esp_core_dump_image_get(&address, &size) == ESP_OK)
-  {
-    const esp_partition_t *pt = NULL;
-    pt = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, "coredump");
-
-    if (pt != NULL)
-    {
-      uint8_t bf[256];
-      char str_dst[640];
-      int16_t toRead;
-
-      for (int16_t i = 0; i < (size / 256) + 1; i++)
-      {
-        strcpy(str_dst, "");
-        toRead = (size - i * 256) > 256 ? 256 : (size - i * 256);
-
-        esp_err_t er = esp_partition_read(pt, i * 256, bf, toRead);
-        if (er != ESP_OK)
-        {
-          Serial.printf("FAIL [%x]\n",er);
-          //ESP_LOGE("ESP32", "FAIL [%x]", er);
-          break;
-        }
-
-        for (int16_t j = 0; j < 256; j++)
-        {
-          char str_tmp[3];
-
-          sprintf(str_tmp, "%02x", bf[j]);
-          strcat(str_dst, str_tmp);
-        }
-
-        printf("%s", str_dst);
-      }
-    }
-    else
-    {
-      Serial.println("Partition NULL");
-      //ESP_LOGE("ESP32", "Partition NULL");
-    }
-    // esp_core_dump_image_erase();
-  }
-  else
-  {
-    Serial.println("esp_core_dump_image_get() FAIL");
-    //ESP_LOGI("ESP32", "esp_core_dump_image_get() FAIL");
-  }
-}
-
-// esp_err_t esp_core_dump_image_erase()
-// {
-//     /* Find the partition that could potentially contain a (previous) core dump. */
-//     const esp_partition_t *core_part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA,
-//                                                                 ESP_PARTITION_SUBTYPE_DATA_COREDUMP,
-//                                                                 "coredump");
-//     if (!core_part) {
-//         Serial.println("No core dump partition found!");
-//         return ESP_ERR_NOT_FOUND;
-//     }
-//     if (core_part->size < sizeof(uint32_t)) {
-//         Serial.println("Too small core dump partition!");
-//         return ESP_ERR_INVALID_SIZE;
-//     }
-
-//     esp_err_t err = ESP_OK;
-//     err = esp_partition_erase_range(core_part, 0, core_part->size);
-//     if (err != ESP_OK) {
-//         Serial.printf("Failed to erase core dump partition (%d)!\n", err);
-//         return err;
-//     }
-
-//     // on encrypted flash esp_partition_erase_range will leave encrypted
-//     // garbage instead of 0xFFFFFFFF so overwriting again to safely signalize
-//     // deleted coredumps
-//     const uint32_t invalid_size = 0xFFFFFFFF;
-//     err = esp_partition_write(core_part, 0, &invalid_size, sizeof(invalid_size));
-//     if (err != ESP_OK) {
-//         Serial.printf("Failed to write core dump partition size (%d)!\n", err);
-//     }
-
-//     return err;
-// }
-
 void setup()
 {
   // basic setup
   Serial.begin(115200);
+  // initCoreDumpFlash();
   esp_core_dump_init();
   pinMode(LED_BUILTIN, OUTPUT);
   pinMode(PUMPPIN, OUTPUT);
@@ -1217,7 +1286,8 @@ void setup()
   if (!preferences.begin("wifi"))
   {
     Serial.println("Error opening NVS-Namespace");
-    for (;;);  // leere Dauerschleife -> Ende
+    for (;;)
+      ; // leere Dauerschleife -> Ende
   }
   iotWebConf.setupUpdateServer(
       [](const char *updatePath)
@@ -1261,15 +1331,15 @@ void setup()
     if (preferences.isKey("apPassword"))
       strncpy(iotWebConf.getApPasswordParameter()->valueBuffer, preferences.getString("apPassword").c_str(), iotWebConf.getApPasswordParameter()->getLength());
     else
-      String("AP Password not found for restauration.");
+      Serial.println("AP Password not found for restauration.");
     if (preferences.isKey("wifiSsid"))
       strncpy(iotWebConf.getWifiSsidParameter()->valueBuffer, preferences.getString("wifiSsid").c_str(), iotWebConf.getWifiSsidParameter()->getLength());
     else
-      String("WiFi SSID not found for restauration.");
+      Serial.println("WiFi SSID not found for restauration.");
     if (preferences.isKey("wifiPassword"))
       strncpy(iotWebConf.getWifiPasswordParameter()->valueBuffer, preferences.getString("wifiPassword").c_str(), iotWebConf.getWifiPasswordParameter()->getLength());
     else
-      String("WiFi Password not found for restauration.");
+      Serial.println("WiFi Password not found for restauration.");
     iotWebConf.saveConfig();
     iotWebConf.resetWifiAuthInfo();
   }
@@ -1281,6 +1351,9 @@ void setup()
             { iotWebConf.handleConfig(); });
   server.onNotFound([]()
                     { iotWebConf.handleNotFound(); });
+  server.on("/coredump", handleCoreDump);
+  server.on("/deletecoredump", handleDeleteCoreDump);
+  server.on("/crash", startCrash);
   Serial.println("Wifi manager ready.");
 
   mqttClient.onConnect(onMqttConnect);
@@ -1292,6 +1365,7 @@ void setup()
   if (mqttUser != "")
     mqttClient.setCredentials(mqttUser, mqttPassword);
   mqttClient.setServer(mqttServer, MQTT_PORT);
+  Serial.println("MQTT ready");
 
   sensors.begin();
   // locate devices on the bus
@@ -1306,15 +1380,18 @@ void setup()
   if (!sensors.getAddress(sensorInt_id, atol(tempIntParam.value())))
     sensorDetectionError = true;
   checkSensors();
+  Serial.println("Sensors ready");
 
   // configure the timezone
   configTime(0, 0, ntpServer);
   setTimezone(ntpTimezone);
+  Serial.println("NTP ready");
 
   // Init OTA function
   ArduinoOTA.onStart([]()
                      {
     Serial.println("Start OTA");
+    display.displayOn();
     display.clear();
     display.setFont(ArialMT_Plain_10);
     display.setTextAlignment(TEXT_ALIGN_CENTER_BOTH);
@@ -1344,9 +1421,7 @@ void setup()
     display.clear();
     display.setFont(ArialMT_Plain_24);
     display.drawString(display.getWidth() / 2, display.getHeight() / 2, "OTA Failed"); });
-  ArduinoOTA.begin();
   Serial.println("OTA Ready");
-  Serial.println(WiFi.localIP());
 
   // Timers
   secTimer.attach(1, onSecTimer);
