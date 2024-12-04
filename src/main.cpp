@@ -747,11 +747,29 @@ String getStatusJson()
   return jsonString;
 }
 
+void detectSensors()
+{
+  // locate devices on the bus
+  Serial.print("Searching devices...");
+  Serial.print("Found ");
+  Serial.print(sensors.getDeviceCount(), DEC);
+  Serial.println(" devices.");
+  sensorDetectionError = false;
+  if (!sensors.getAddress(sensorOut_id, atol(tempOutParam.value())))
+    sensorDetectionError = true;
+  if (!sensors.getAddress(sensorRet_id, atol(tempRetParam.value())))
+    sensorDetectionError = true;
+  if (!sensors.getAddress(sensorInt_id, atol(tempIntParam.value())))
+    sensorDetectionError = true;
+}
+
 void checkSensors()
 {
+  String info;
   if (sensorDetectionError)
   {
-    mqttPublish(MQTT_PUB_INFO, "sensorerror");
+    info = "sensorerror - device count: " + String(sensors.getDeviceCount());
+    mqttPublish(MQTT_PUB_INFO, info.c_str());
     sensorError = true;
   }
   else
@@ -766,7 +784,8 @@ void checkSensors()
     }
     else
     {
-      mqttPublish(MQTT_PUB_INFO, "sensorerror");
+      info = "sensorerror - device count: " + String(sensors.getDeviceCount());
+      mqttPublish(MQTT_PUB_INFO, info.c_str());
       sensorError = true;
     }
   }
@@ -1252,6 +1271,9 @@ void onSecTimer()
 
 void onSec10Timer()
 {
+  if (sensorDetectionError)
+    detectSensors();
+  checkSensors();
   mqttSendTopics();
 }
 
@@ -1368,17 +1390,7 @@ void setup()
   Serial.println("MQTT ready");
 
   sensors.begin();
-  // locate devices on the bus
-  Serial.print("Searching devices...");
-  Serial.print("Found ");
-  Serial.print(sensors.getDeviceCount(), DEC);
-  Serial.println(" devices.");
-  if (!sensors.getAddress(sensorOut_id, atol(tempOutParam.value())))
-    sensorDetectionError = true;
-  if (!sensors.getAddress(sensorRet_id, atol(tempRetParam.value())))
-    sensorDetectionError = true;
-  if (!sensors.getAddress(sensorInt_id, atol(tempIntParam.value())))
-    sensorDetectionError = true;
+  detectSensors();
   checkSensors();
   Serial.println("Sensors ready");
 
