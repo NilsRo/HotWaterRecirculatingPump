@@ -794,15 +794,15 @@ void checkSensors()
 void getTemp()
 {
   sensors.requestTemperatures(); // Send the command to get temperatures
-  if (sensors.isConnected(sensorOut_id))
+  if (sensors.isConnected(sensorOut_id) && !sensorDetectionError)
     tempOut = sensors.getTempC(sensorOut_id);
   else
     tempOut = 0;
-  if (sensors.isConnected(sensorRet_id))
+  if (sensors.isConnected(sensorRet_id) && !sensorDetectionError)
     tempRet = sensors.getTempC(sensorRet_id);
   else
     tempRet = 0;
-  if (sensors.isConnected(sensorInt_id))
+  if (sensors.isConnected(sensorInt_id) && !sensorDetectionError)
     tempInt = sensors.getTempC(sensorInt_id);
   else
     tempInt = 0;
