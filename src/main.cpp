@@ -774,7 +774,7 @@ void checkSensors()
   }
   else
   {
-    if (sensors.isConnected(sensorInt_id) && sensors.isConnected(sensorInt_id) && sensors.isConnected(sensorInt_id))
+    if (sensors.isConnected(sensorInt_id) && sensors.isConnected(sensorRet_id) && sensors.isConnected(sensorOut_id))
     {
       if (sensorError)
         mqttPublish(MQTT_PUB_INFO, "sensorerror solved");
@@ -784,7 +784,7 @@ void checkSensors()
     }
     else
     {
-      info = "sensorerror - device count: " + String(sensors.getDeviceCount());
+      info = "sensorerror - device count: " + String(sensors.getDeviceCount() + " internal: " + String(sensors.isConnected(sensorInt_id)) + " return: " + String(sensors.isConnected(sensorRet_id)) + " out: " + String(sensors.isConnected(sensorOut_id)));
       mqttPublish(MQTT_PUB_INFO, info.c_str());
       sensorError = true;
     }
@@ -794,9 +794,18 @@ void checkSensors()
 void getTemp()
 {
   sensors.requestTemperatures(); // Send the command to get temperatures
-  tempOut = sensors.getTempC(sensorOut_id);
-  tempRet = sensors.getTempC(sensorRet_id);
-  tempInt = sensors.getTempC(sensorInt_id);
+  if (sensors.isConnected(sensorOut_id))
+    tempOut = sensors.getTempC(sensorOut_id);
+  else
+    tempOut = 0;
+  if (sensors.isConnected(sensorRet_id))
+    tempRet = sensors.getTempC(sensorRet_id);
+  else
+    tempRet = 0;
+  if (sensors.isConnected(sensorInt_id))
+    tempInt = sensors.getTempC(sensorInt_id);
+  else
+    tempInt = 0;
   // Serial.print(" Temp Out: ");
   // Serial.println(tempOut);
   // Serial.print(" Temp In: ");
@@ -1208,7 +1217,7 @@ void pumpOff()
 
 void check()
 {
-
+  getTemp();
   if (sensorError)
   {
     // Emergency Mode if missing sensors
@@ -1225,7 +1234,6 @@ void check()
   }
   else
   {
-    getTemp();
     if (mqttThermalDesinfection)
     {
       if (!pumpRunning)
