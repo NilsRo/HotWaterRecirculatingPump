@@ -1208,7 +1208,7 @@ void pumpOff()
 
 void check()
 {
-
+  getTemp();
   if (sensorError)
   {
     // Emergency Mode if missing sensors
@@ -1225,7 +1225,6 @@ void check()
   }
   else
   {
-    getTemp();
     if (mqttThermalDesinfection)
     {
       if (!pumpRunning)
