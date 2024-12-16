@@ -21,6 +21,7 @@
 #include <esp_core_dump.h>
 
 #define STRING_LEN 128
+#define DALLASADRESS_LEN 17
 #define nils_length(x) ((sizeof(x) / sizeof(0 [x])) / ((size_t)(!(sizeof(x) % sizeof(0 [x])))))
 // #define nils_length( x ) ( sizeof(x) )
 
@@ -57,7 +58,6 @@ DallasTemperature sensors(&oneWire);
 DeviceAddress sensorOut_id;
 DeviceAddress sensorRet_id;
 DeviceAddress sensorInt_id;
-bool sensorDetectionError = false;
 bool sensorError = false;
 
 // OLED Display
@@ -79,7 +79,7 @@ bool needReset = false;
 #define MQTT_PUB_TEMP_INT "Tint"
 #define MQTT_PUB_PUMP "dhw_pump_circulation"
 #define MQTT_PUB_INFO "info"
-#define MQTT_PUB_STATUS "status"
+#define MQTT_PUB_SYSINFO "sysinfo"
 AsyncMqttClient mqttClient;
 String mqttDisconnectReason;
 char mqttDisconnectTime[40];
@@ -121,15 +121,15 @@ unsigned int networksPageTotal = 0;
 unsigned long displayPageSubChange = 0;
 unsigned int langu = 0;
 
-#define CONFIG_VERSION "5"
+#define CONFIG_VERSION "6"
 Preferences preferences;
 int iotWebConfPinState = HIGH;
 unsigned long iotWebConfPinChanged = 0;
 DNSServer dnsServer;
 WebServer server(80);
 HTTPUpdateServer httpUpdater;
-static const char chooserValues[][STRING_LEN] = {"0", "1", "2"};
-static const char chooserNames[][STRING_LEN] = {"Sensor 1", "Sensor 2", "Sensor 3"};
+static char chooserValues[][DALLASADRESS_LEN] = {"0", "0", "0"};
+static char chooserNames[][STRING_LEN] = {"Sensor 1 NA", "Sensor 2 NA", "Sensor 3 NA"};
 static const char languValues[][STRING_LEN] = {"0", "1"};
 static const char languNames[][STRING_LEN] = {"German", "English"};
 IotWebConf iotWebConf("Zirkulationspumpe", &dnsServer, &server, "", CONFIG_VERSION);
@@ -148,12 +148,12 @@ IotWebConfParameterGroup ntpGroup = IotWebConfParameterGroup("ntp", "NTP");
 IotWebConfTextParameter ntpServerParam = IotWebConfTextParameter("server", "ntpServer", ntpServer, STRING_LEN, "de.pool.ntp.org");
 IotWebConfTextParameter ntpTimezoneParam = IotWebConfTextParameter("timezone", "ntpTimezone", ntpTimezone, STRING_LEN, "CET-1CEST,M3.5.0/02,M10.5.0/03");
 IotWebConfParameterGroup tempGroup = IotWebConfParameterGroup("temp", "Temperature");
-iotwebconf::SelectTParameter<STRING_LEN> tempOutParam =
-    iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempOutParam").label("out").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("1").build();
-iotwebconf::SelectTParameter<STRING_LEN> tempRetParam =
-    iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempRetParam").label("return").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("2").build();
-iotwebconf::SelectTParameter<STRING_LEN> tempIntParam =
-    iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("tempIntParam").label("internal").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("3").build();
+iotwebconf::SelectTParameter<DALLASADRESS_LEN> tempOutParam =
+    iotwebconf::Builder<iotwebconf::SelectTParameter<DALLASADRESS_LEN>>("tempOutParam").label("out").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / DALLASADRESS_LEN).nameLength(STRING_LEN).build();
+iotwebconf::SelectTParameter<DALLASADRESS_LEN> tempRetParam =
+    iotwebconf::Builder<iotwebconf::SelectTParameter<DALLASADRESS_LEN>>("tempRetParam").label("return").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / DALLASADRESS_LEN).nameLength(STRING_LEN).build();
+iotwebconf::SelectTParameter<DALLASADRESS_LEN> tempIntParam =
+    iotwebconf::Builder<iotwebconf::SelectTParameter<DALLASADRESS_LEN>>("tempIntParam").label("internal").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / DALLASADRESS_LEN).nameLength(STRING_LEN).build();
 iotwebconf::FloatTParameter tempRetDiffParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("tempRetDiffParam").label("return off diff.").defaultValue(10.0).step(0.5).placeholder("e.g. 23.4").build();
 iotwebconf::FloatTParameter tempTriggerParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("tempTriggerParam").label("temperature trigger").defaultValue(0.125).step(0.0625).placeholder("e.g. 0.12").build();
 IotWebConfParameterGroup miscGroup = IotWebConfParameterGroup("misc", "misc.");
@@ -396,21 +396,21 @@ void handleRoot()
   s += "<table border = \"0\"><tr>";
   s += "<td>" + String(tempOutParam.label) + ": </td>";
   s += "<td>";
-  s += chooserNames[atol(tempOutParam.value())];
+  s += tempOutParam.value();
   dtostrf(tempOut, 2, 2, tempStr);
   s += " / " + String(tempStr) + "&#8451;";
   s += "</td>";
   s += "</tr><tr>";
   s += "<td>" + String(tempRetParam.label) + ": </td>";
   s += "<td>";
-  s += chooserNames[atol(tempRetParam.value())];
+  s += tempRetParam.value();
   dtostrf(tempRet, 2, 2, tempStr);
   s += " / " + String(tempStr) + "&#8451;";
   s += "</td>";
   s += "</tr><tr>";
   s += "<td>" + String(tempIntParam.label) + ": </td>";
   s += "<td>";
-  s += chooserNames[atol(tempIntParam.value())];
+  s += tempIntParam.value();
   dtostrf(tempInt, 2, 2, tempStr);
   s += " / " + String(tempStr) + "&#8451;";
   s += "</td>";
@@ -526,9 +526,13 @@ void onWifiDisconnect(WiFiEvent_t event, WiFiEventInfo_t info)
 
 void onMqttConnect(bool sessionPresent)
 {
+  std::string tempTopic;
+  tempTopic.append(mqttTopicPath);
+  tempTopic.append("status");
   Serial.println("Connected to MQTT.");
   Serial.print("Session present: ");
   Serial.println(sessionPresent);
+  mqttClient.publish(tempTopic.c_str(), 1, true, "online");
   uint16_t packetIdSub;
   if (strlen(mqttHeaterStatusTopic) > 0)
   {
@@ -652,8 +656,9 @@ void mqttPublish(const char *topic, const char *payload)
   }
   else
   {
-    Serial.print("mqtt message could not be send: ");
+    Serial.print("mqtt topic could not be send: ");
     Serial.println(tempTopic.c_str());
+    Serial.print("payload: ");
     Serial.println(payload);
   }
 }
@@ -700,7 +705,7 @@ void mqttSendTopics(bool mqttInit)
   if (getStatusJson() != mqttStatus || mqttInit)
   {
     mqttStatus = getStatusJson();
-    mqttPublish(MQTT_PUB_STATUS, mqttStatus.c_str());
+    mqttPublish(MQTT_PUB_SYSINFO, mqttStatus.c_str());
   }
   if (mqttInit)
     mqttPublishUptime();
@@ -743,75 +748,11 @@ String getStatusJson()
     else
       object["state"] = "heater off";
   }
+  object["sensor_out_conn"] = sensors.isConnected(sensorOut_id);
+  object["sensor_ret_conn"] = sensors.isConnected(sensorRet_id);
+  object["sensor_int_present"] = sensors.isConnected(sensorInt_id);
   serializeJson(object, jsonString);
   return jsonString;
-}
-
-void detectSensors()
-{
-  // locate devices on the bus
-  Serial.print("Searching devices...");
-  Serial.print("Found ");
-  Serial.print(sensors.getDeviceCount(), DEC);
-  Serial.println(" devices.");
-  sensorDetectionError = false;
-  if (!sensors.getAddress(sensorOut_id, atol(tempOutParam.value())))
-    sensorDetectionError = true;
-  if (!sensors.getAddress(sensorRet_id, atol(tempRetParam.value())))
-    sensorDetectionError = true;
-  if (!sensors.getAddress(sensorInt_id, atol(tempIntParam.value())))
-    sensorDetectionError = true;
-}
-
-void checkSensors()
-{
-  String info;
-  if (sensorDetectionError)
-  {
-    info = "sensorerror - device count: " + String(sensors.getDeviceCount());
-    mqttPublish(MQTT_PUB_INFO, info.c_str());
-    sensorError = true;
-  }
-  else
-  {
-    if (sensors.isConnected(sensorInt_id) && sensors.isConnected(sensorRet_id) && sensors.isConnected(sensorOut_id))
-    {
-      if (sensorError)
-        mqttPublish(MQTT_PUB_INFO, "sensorerror solved");
-      sensorError = false;
-      sensors.setResolution(sensorOut_id, 12); // hohe Genauigkeit
-      sensors.setResolution(sensorRet_id, 12); // hohe Genauigkeit
-    }
-    else
-    {
-      info = "sensorerror - device count: " + String(sensors.getDeviceCount() + " internal: " + String(sensors.isConnected(sensorInt_id)) + " return: " + String(sensors.isConnected(sensorRet_id)) + " out: " + String(sensors.isConnected(sensorOut_id)));
-      mqttPublish(MQTT_PUB_INFO, info.c_str());
-      sensorError = true;
-    }
-  }
-}
-
-void getTemp()
-{
-  sensors.requestTemperatures(); // Send the command to get temperatures
-  if (sensors.isConnected(sensorOut_id) && !sensorDetectionError)
-    tempOut = sensors.getTempC(sensorOut_id);
-  else
-    tempOut = 0;
-  if (sensors.isConnected(sensorRet_id) && !sensorDetectionError)
-    tempRet = sensors.getTempC(sensorRet_id);
-  else
-    tempRet = 0;
-  if (sensors.isConnected(sensorInt_id) && !sensorDetectionError)
-    tempInt = sensors.getTempC(sensorInt_id);
-  else
-    tempInt = 0;
-  // Serial.print(" Temp Out: ");
-  // Serial.println(tempOut);
-  // Serial.print(" Temp In: ");
-  // Serial.println(tempRet);
-  // Serial.print(" Temp Int: ");
-  // Serial.println(tempInt);
 }
 
 void printAddress(DeviceAddress deviceAddress)
@@ -837,6 +778,98 @@ String formatAdress(DeviceAddress deviceAddress)
     adr = adr + String(deviceAddress[i], HEX);
   }
   return adr;
+}
+
+/// in: valid chars are 0-9 + A-F + a-f
+/// out_len_max==0: convert until the end of input string, out_len_max>0 only convert this many numbers
+/// returns actual out size
+int hexStr2Arr(unsigned char *out, const char *in, size_t out_len_max = 0)
+{
+  if (!out_len_max)
+    out_len_max = 2147483647; // INT_MAX
+
+  const int in_len = strnlen(in, out_len_max * 2);
+  if (in_len % 2 != 0)
+    return -1; // error, in str len should be even
+
+  // calc actual out len
+  const int out_len = out_len_max < (in_len / 2) ? out_len_max : (in_len / 2);
+
+  for (int i = 0; i < out_len; i++)
+  {
+    char ch0 = in[2 * i];
+    char ch1 = in[2 * i + 1];
+    uint8_t nib0 = (ch0 & 0xF) + (ch0 >> 6) | ((ch0 >> 3) & 0x8);
+    uint8_t nib1 = (ch1 & 0xF) + (ch1 >> 6) | ((ch1 >> 3) & 0x8);
+    out[i] = (nib0 << 4) | nib1;
+  }
+  return out_len;
+}
+
+void detectSensors()
+{
+  int i;
+  // locate devices on the bus
+  Serial.print("Searching devices...");
+  Serial.print("Found ");
+  Serial.print(sensors.getDeviceCount(), DEC);
+  Serial.println(" devices.");
+
+  // fill connected devices for configuration
+  for (i = 0; i < sensors.getDeviceCount(); i++)
+  {
+    DeviceAddress sensor_id;
+    char str[5];
+    sensors.getAddress(sensor_id, i);
+    printAddress(sensor_id);
+    snprintf(chooserNames[i], sizeof(chooserNames[i]), "%s - %.2f C°", formatAdress(sensor_id).c_str(), sensors.getTempC(sensor_id));
+    snprintf(chooserValues[i], sizeof(chooserValues[i]), "%s", formatAdress(sensor_id).c_str());
+  }
+  hexStr2Arr(sensorInt_id, tempIntParam.value());
+  hexStr2Arr(sensorOut_id, tempOutParam.value());
+  hexStr2Arr(sensorRet_id, tempRetParam.value());
+}
+
+void checkSensors()
+{
+  String info;
+  if (sensors.isConnected(sensorInt_id) && sensors.isConnected(sensorRet_id) && sensors.isConnected(sensorOut_id) && sensors.getDeviceCount() == 3)
+  {
+    if (sensorError)
+      mqttPublish(MQTT_PUB_INFO, "sensorerror solved");
+    sensorError = false;
+    sensors.setResolution(sensorOut_id, 12); // hohe Genauigkeit
+    sensors.setResolution(sensorRet_id, 12); // hohe Genauigkeit
+  }
+  else
+  {
+    info = "sensorerror - internal: " + String(sensors.isConnected(sensorInt_id)) + " return: " + String(sensors.isConnected(sensorRet_id)) + " out: " + String(sensors.isConnected(sensorOut_id));
+    mqttPublish(MQTT_PUB_INFO, info.c_str());
+    sensorError = true;
+  }
+}
+
+void getTemp()
+{
+  sensors.requestTemperatures(); // Send the command to get temperatures
+  if (sensors.isConnected(sensorOut_id))
+    tempOut = sensors.getTempC(sensorOut_id);
+  else
+    tempOut = 0;
+  if (sensors.isConnected(sensorRet_id))
+    tempRet = sensors.getTempC(sensorRet_id);
+  else
+    tempRet = 0;
+  if (sensors.isConnected(sensorInt_id))
+    tempInt = sensors.getTempC(sensorInt_id);
+  else
+    tempInt = 0;
+  // Serial.print(" Temp Out: ");
+  // Serial.println(tempOut);
+  // Serial.print(" Temp In: ");
+  // Serial.println(tempRet);
+  // Serial.print(" Temp Int: ");
+  // Serial.println(tempInt);
 }
 
 void getLocalTime()
@@ -907,28 +940,21 @@ void updateDisplay()
     display.drawString(128, 0, tempStr);
     display.drawLine(0, 11, 128, 11);
     display.setTextAlignment(TEXT_ALIGN_CENTER);
-    if (sensorDetectionError)
+
+    if (sensors.isConnected(sensorOut_id))
     {
-      display.setFont(ArialMT_Plain_16);
-      display.drawString(64, 14, txtSenseErr[langu]);
+      dtostrf(tempOut, 2, 2, tempStr);
+      display.drawString(64, 12, String(txtFlow[langu]) + ": " + String(tempStr) + " C°");
     }
     else
+      display.drawString(64, 12, String(txtFlow[langu]) + ": ERROR!");
+    if (sensors.isConnected(sensorRet_id))
     {
-      if (sensors.isConnected(sensorOut_id))
-      {
-        dtostrf(tempOut, 2, 2, tempStr);
-        display.drawString(64, 12, String(txtFlow[langu]) + ": " + String(tempStr) + " C°");
-      }
-      else
-        display.drawString(64, 12, String(txtFlow[langu]) + ": ERROR!");
-      if (sensors.isConnected(sensorRet_id))
-      {
-        dtostrf(tempRet, 2, 2, tempStr);
-        display.drawString(64, 24, String(txtReturn[langu]) + ": " + String(tempStr) + " C°");
-      }
-      else
-        display.drawString(64, 24, String(txtReturn[langu]) + ": ERROR!");
+      dtostrf(tempRet, 2, 2, tempStr);
+      display.drawString(64, 24, String(txtReturn[langu]) + ": " + String(tempStr) + " C°");
     }
+    else
+      display.drawString(64, 24, String(txtReturn[langu]) + ": ERROR!");
 
     display.setFont(ArialMT_Plain_24);
     display.setTextAlignment(TEXT_ALIGN_CENTER);
@@ -1279,8 +1305,7 @@ void onSecTimer()
 
 void onSec10Timer()
 {
-  if (sensorDetectionError)
-    detectSensors();
+  detectSensors();
   checkSensors();
   mqttSendTopics();
 }
@@ -1383,9 +1408,12 @@ void setup()
                     { iotWebConf.handleNotFound(); });
   server.on("/coredump", handleCoreDump);
   server.on("/deletecoredump", handleDeleteCoreDump);
-  server.on("/crash", startCrash);
+  server.on("/crash", startCrash); // Adress to create a coredump for testing
   Serial.println("Wifi manager ready.");
 
+  std::string tempTopic;
+  tempTopic.append(mqttTopicPath);
+  tempTopic.append("status");
   mqttClient.onConnect(onMqttConnect);
   mqttClient.onDisconnect(onMqttDisconnect);
   mqttClient.onPublish(onMqttPublish);
@@ -1395,6 +1423,7 @@ void setup()
   if (mqttUser != "")
     mqttClient.setCredentials(mqttUser, mqttPassword);
   mqttClient.setServer(mqttServer, MQTT_PORT);
+  mqttClient.setWill(tempTopic.c_str(), 1, true, "offline");
   Serial.println("MQTT ready");
 
   sensors.begin();
