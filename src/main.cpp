@@ -526,9 +526,9 @@ void onWifiDisconnect(WiFiEvent_t event, WiFiEventInfo_t info)
 
 void onMqttConnect(bool sessionPresent)
 {
-  std::string tempTopic;
-  tempTopic.append(mqttTopicPath);
-  tempTopic.append("status");
+  String tempTopic;
+  tempTopic = mqttTopicPath;
+  tempTopic += "status";
   Serial.println("Connected to MQTT.");
   Serial.print("Session present: ");
   Serial.println(sessionPresent);
@@ -1411,9 +1411,9 @@ void setup()
   server.on("/crash", startCrash); // Adress to create a coredump for testing
   Serial.println("Wifi manager ready.");
 
-  std::string tempTopic;
-  tempTopic.append(mqttTopicPath);
-  tempTopic.append("status");
+  String tempTopic;
+  tempTopic = mqttTopicPath;
+  tempTopic += "status";
   mqttClient.onConnect(onMqttConnect);
   mqttClient.onDisconnect(onMqttDisconnect);
   mqttClient.onPublish(onMqttPublish);
@@ -1423,7 +1423,7 @@ void setup()
   if (mqttUser != "")
     mqttClient.setCredentials(mqttUser, mqttPassword);
   mqttClient.setServer(mqttServer, MQTT_PORT);
-  mqttClient.setWill(tempTopic.c_str(), 1, true, "offline");
+  // mqttClient.setWill(tempTopic.c_str(), 1, true, "offline");
   Serial.println("MQTT ready");
 
   sensors.begin();

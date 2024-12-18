@@ -41,7 +41,7 @@ On first start the thing will open an Access Point named "Zirkulationspumpe" to 
       * "ww/ht/dhw_Treturn": return temperature of the warm water circulation
       * "ww/ht/Tint": system internal temperature
       * "ww/ht/dhw_pump_circulation": pump is running or not
-      * "ww/ht/status": availability of the system is connected to mqtt broker (online) or not (offline)
+      * "ww/ht/status": availability of the system is connected to mqtt broker (online) or not (offline/last will actually not working, under review)
       * "ww/ht/sysinfo": status of the system showing the actual mode as Json
         * mode 
           * auto - automatic mode
