@@ -79,6 +79,7 @@ bool needReset = false;
 #define MQTT_PUB_TEMP_INT "Tint"
 #define MQTT_PUB_PUMP "dhw_pump_circulation"
 #define MQTT_PUB_INFO "info"
+#define MQTT_PUB_STATUS "status"
 #define MQTT_PUB_SYSINFO "sysinfo"
 AsyncMqttClient mqttClient;
 String mqttDisconnectReason;
@@ -87,6 +88,7 @@ char mqttServer[STRING_LEN];
 char mqttUser[STRING_LEN];
 char mqttPassword[STRING_LEN];
 char mqttTopicPath[STRING_LEN];
+static char mqttWillTopic[STRING_LEN];
 char mqttHeaterStatusTopic[STRING_LEN];
 char mqttHeaterStatusValue[STRING_LEN];
 bool mqttHeaterStatus = true;
@@ -169,7 +171,7 @@ int mod(int x, int y)
 // Necessary forward declarations
 String getStatus();
 String getStatusJson();
-
+void mqttPublish(const char *topic, const char *payload);
 void mqttSendTopics(bool mqttInit = false);
 //--
 
@@ -526,13 +528,10 @@ void onWifiDisconnect(WiFiEvent_t event, WiFiEventInfo_t info)
 
 void onMqttConnect(bool sessionPresent)
 {
-  String tempTopic;
-  tempTopic = mqttTopicPath;
-  tempTopic += "status";
   Serial.println("Connected to MQTT.");
   Serial.print("Session present: ");
   Serial.println(sessionPresent);
-  mqttClient.publish(tempTopic.c_str(), 1, true, "online");
+  mqttPublish(MQTT_PUB_STATUS, "Online");
   uint16_t packetIdSub;
   if (strlen(mqttHeaterStatusTopic) > 0)
   {
@@ -729,9 +728,7 @@ String getStatus()
 
 String getStatusJson()
 {
-  const size_t CAPACITY = JSON_OBJECT_SIZE(2);
-  StaticJsonDocument<CAPACITY> doc;
-  JsonObject object = doc.to<JsonObject>();
+  JsonObject object;
   String jsonString;
 
   if (pumpManual)
@@ -1411,9 +1408,9 @@ void setup()
   server.on("/crash", startCrash); // Adress to create a coredump for testing
   Serial.println("Wifi manager ready.");
 
-  String tempTopic;
-  tempTopic = mqttTopicPath;
-  tempTopic += "status";
+  strcpy(mqttWillTopic, mqttTopicPath);
+  strcat(mqttWillTopic, MQTT_PUB_STATUS);
+  mqttClient.setWill(mqttWillTopic, 0, true, "Offline", 7);
   mqttClient.onConnect(onMqttConnect);
   mqttClient.onDisconnect(onMqttDisconnect);
   mqttClient.onPublish(onMqttPublish);
@@ -1423,7 +1420,6 @@ void setup()
   if (mqttUser != "")
     mqttClient.setCredentials(mqttUser, mqttPassword);
   mqttClient.setServer(mqttServer, MQTT_PORT);
-  // mqttClient.setWill(tempTopic.c_str(), 1, true, "offline");
   Serial.println("MQTT ready");
 
   sensors.begin();
