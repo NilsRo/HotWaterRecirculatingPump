@@ -371,6 +371,12 @@ void handleRoot()
   s += "<td>" + String(mqttThermalDesinfectionTopicParam.label) + ": </td>";
   s += "<td>" + String(mqttThermalDesinfectionTopic) + " - " + String(mqttThermalDesinfectionValue) + "</td>";
   s += "</tr><tr>";
+  s += "<td>status: </td>";
+  if (mqttClient.connected())
+    s += "<td>connected</td>";
+  else
+    s += "<td>disconnected</td>";
+  s += "</tr><tr>";
   s += "<td>last disconnect reason: </td>";
   s += "<td>" + mqttDisconnectReason + "</td>";
   s += "</tr><tr>";
