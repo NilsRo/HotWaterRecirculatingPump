@@ -96,6 +96,9 @@ char mqttPumpTopic[STRING_LEN];
 char mqttPumpValue[STRING_LEN];
 bool mqttPump = false;
 bool mqttPumpRunning = false;
+char mqttValveTopic[STRING_LEN];
+char mqttValveValue[STRING_LEN];
+bool mqttValve = false;
 String mqttStatus = "";
 char mqttThermalDesinfectionTopic[STRING_LEN];
 char mqttThermalDesinfectionValue[STRING_LEN];
@@ -142,10 +145,12 @@ IotWebConfPasswordParameter mqttUserPasswordParam = IotWebConfPasswordParameter(
 IotWebConfTextParameter mqttTopicPathParam = IotWebConfTextParameter("topicpath", "mqttTopicPath", mqttTopicPath, STRING_LEN, "ww/ht/");
 IotWebConfTextParameter mqttHeaterStatusTopicParam = IotWebConfTextParameter("heater status topic", "mqttHeaterStatusTopic", mqttHeaterStatusTopic, STRING_LEN, "ht3/hometop/ht/hc1_Tniveau");
 IotWebConfTextParameter mqttHeaterStatusValueParam = IotWebConfTextParameter("heater status value", "mqttHeaterStatusValue", mqttHeaterStatusValue, STRING_LEN, "3");
-IotWebConfTextParameter mqttPumpTopicParam = IotWebConfTextParameter("external pump start topic", "mqttPumpTopic", mqttPumpTopic, STRING_LEN, "");
-IotWebConfTextParameter mqttPumpValueParam = IotWebConfTextParameter("external pump start Value", "mqttPumpValue", mqttPumpValue, STRING_LEN, "");
+IotWebConfTextParameter mqttPumpTopicParam = IotWebConfTextParameter("external pump start topic", "mqttPumpTopic", mqttPumpTopic, STRING_LEN, "pump_trigger");
+IotWebConfTextParameter mqttPumpValueParam = IotWebConfTextParameter("external pump start Value", "mqttPumpValue", mqttPumpValue, STRING_LEN, "1");
 IotWebConfTextParameter mqttThermalDesinfectionTopicParam = IotWebConfTextParameter("thermal desinfection topic", "mqttThermalDesinfectionTopic", mqttThermalDesinfectionTopic, STRING_LEN, "ht3/hometop/ht/dhw_thermal_desinfection");
 IotWebConfTextParameter mqttThermalDesinfectionValueParam = IotWebConfTextParameter("thermal desinfection Value", "mqttThermalDesinfectionValue", mqttThermalDesinfectionValue, STRING_LEN, "1");
+IotWebConfTextParameter mqttValveTopicParam = IotWebConfTextParameter("external pump start topic", "mqttValveTopic", mqttValveTopic, STRING_LEN, "valve_trigger");
+IotWebConfTextParameter mqttValveValueParam = IotWebConfTextParameter("external pump start Value", "mqttValveValue", mqttValveValue, STRING_LEN, "1");
 IotWebConfParameterGroup ntpGroup = IotWebConfParameterGroup("ntp", "NTP");
 IotWebConfTextParameter ntpServerParam = IotWebConfTextParameter("server", "ntpServer", ntpServer, STRING_LEN, "de.pool.ntp.org");
 IotWebConfTextParameter ntpTimezoneParam = IotWebConfTextParameter("timezone", "ntpTimezone", ntpTimezone, STRING_LEN, "CET-1CEST,M3.5.0/02,M10.5.0/03");
@@ -371,6 +376,9 @@ void handleRoot()
   s += "<td>" + String(mqttThermalDesinfectionTopicParam.label) + ": </td>";
   s += "<td>" + String(mqttThermalDesinfectionTopic) + " - " + String(mqttThermalDesinfectionValue) + "</td>";
   s += "</tr><tr>";
+  s += "<td>" + String(mqttValveTopicParam.label) + ": </td>";
+  s += "<td>" + String(mqttValveTopic) + " - " + String(mqttValveValue) + "</td>";
+  s += "</tr><tr>";
   s += "<td>status: </td>";
   if (mqttClient.connected())
     s += "<td>connected</td>";
@@ -437,6 +445,10 @@ void handleRoot()
     s += "<p>pump: running";
   else
     s += "<p>pump: stopped";
+  if (mqttValve)
+    s += "<p>valve power: on";
+  else
+    s += "<p>valve power: off";
   s += "<p><h3>" + String(nils_length(pump)) + " Last pump actions</h3>";
   for (int i = 0; i < nils_length(pump); i++)
   { // display last pumpOn Events in right order
@@ -557,6 +569,12 @@ void onMqttConnect(bool sessionPresent)
     Serial.print("Subscribed to topic: ");
     Serial.println(String(mqttThermalDesinfectionTopic) + " - " + String(packetIdSub));
   }
+  if (strlen(mqttValveTopic) > 0)
+  {
+    packetIdSub = mqttClient.subscribe(mqttValveTopic, 2);
+    Serial.print("Subscribed to topic: ");
+    Serial.println(String(mqttValveTopic) + " - " + String(packetIdSub));
+  }
   digitalWrite(LED_BUILTIN, HIGH);
   mqttSendTopics(true);
 }
@@ -647,6 +665,13 @@ void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties 
     Serial.print("mqtt heater status: ");
     Serial.println(new_payload);
     mqttHeaterStatus = (strcmp(mqttHeaterStatusValue, new_payload) == 0);
+  }
+  else if (strcmp(topic, mqttValveTopic) == 0)
+  {
+    Serial.print("mqtt valve: ");
+    Serial.println(new_payload);
+    mqttValve = (strcmp(mqttValveValue, new_payload) == 0);
+    digitalWrite(VALVEPIN, !mqttValve);
   }
 }
 
@@ -959,7 +984,7 @@ void updateDisplay()
     else
       display.drawString(64, 24, String(txtReturn[langu]) + ": ERROR!");
 
-    display.setFont(ArialMT_Plain_24);
+    display.setFont(ArialMT_Plain_16);
     display.setTextAlignment(TEXT_ALIGN_CENTER);
     if (pumpRunning)
     {
@@ -977,6 +1002,10 @@ void updateDisplay()
       else
         display.drawString(64, 36, String(txtPumpOff[langu]));
     }
+    if (mqttValve)
+      display.drawString(64, 52, String(txtValveOn[langu]));
+    else
+      display.drawString(64, 52, String(txtValveOff[langu]));
     break;
   case 1:
     // Display Page 2 - last 5 pump starts
@@ -1223,7 +1252,6 @@ void pumpOn()
   pumpStartedAt = millis();
   digitalWrite(PUMPPIN, LOW);
   mqttSendTopics();
-  // digitalWrite(VALVEPIN, HIGH);
   Serial.print("Pump on: ");
   strftime(tempStr, 40, "%d.%m.%Y %T", &localTime);
   Serial.println(tempStr);
@@ -1241,7 +1269,6 @@ void pumpOff()
   pump[pumpCnt] += " (" + String((int)round((millis() - pumpStartedAt) / 1000 / 60)) + " min.)";
   digitalWrite(PUMPPIN, HIGH);
   mqttSendTopics();
-  // digitalWrite(VALVEPIN, LOW);
 }
 
 void check()
@@ -1363,6 +1390,8 @@ void setup()
   mqttGroup.addItem(&mqttPumpValueParam);
   mqttGroup.addItem(&mqttThermalDesinfectionTopicParam);
   mqttGroup.addItem(&mqttThermalDesinfectionValueParam);
+  mqttGroup.addItem(&mqttValveTopicParam);
+  mqttGroup.addItem(&mqttValveValueParam);
   iotWebConf.addParameterGroup(&mqttGroup);
   ntpGroup.addItem(&ntpServerParam);
   ntpGroup.addItem(&ntpTimezoneParam);
