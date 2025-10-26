@@ -45,9 +45,13 @@ unsigned long timeReleased = 0;
 float tempOut;
 float tempRet;
 float tempInt;
+float tempDiff = 0.0;
+float tempDiffTrigger;
+char tempDiffTriggerStr[32];
 float mqttTempOut;
 float mqttTempRet;
 float mqttTempInt;
+float mqttTempDiff;
 unsigned int checkCnt;
 
 // Setup a oneWire instance to communicate with any OneWire devices
@@ -77,6 +81,7 @@ bool needReset = false;
 #define MQTT_PUB_TEMP_OUT "dhw_Tflow_measured"
 #define MQTT_PUB_TEMP_RET "dhw_Treturn"
 #define MQTT_PUB_TEMP_INT "Tint"
+#define MQTT_PUB_TEMP_DIFF "dhw_Tdelta"
 #define MQTT_PUB_PUMP "dhw_pump_circulation"
 #define MQTT_PUB_INFO "info"
 #define MQTT_PUB_STATUS "status"
@@ -162,7 +167,9 @@ iotwebconf::SelectTParameter<DALLASADRESS_LEN> tempRetParam =
 iotwebconf::SelectTParameter<DALLASADRESS_LEN> tempIntParam =
     iotwebconf::Builder<iotwebconf::SelectTParameter<DALLASADRESS_LEN>>("tempIntParam").label("internal").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / DALLASADRESS_LEN).nameLength(STRING_LEN).build();
 iotwebconf::FloatTParameter tempRetDiffParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("tempRetDiffParam").label("return off diff.").defaultValue(10.0).step(0.5).placeholder("e.g. 23.4").build();
-iotwebconf::FloatTParameter tempTriggerParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("tempTriggerParam").label("temperature trigger").defaultValue(0.125).step(0.0625).placeholder("e.g. 0.12").build();
+// iotwebconf::FloatTParameter tempTriggerParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("tempTriggerParam").label("temperature trigger").defaultValue(0.125).step(0.0625).placeholder("e.g. 0.12").build();
+IotWebConfNumberParameter tempTriggerParam = IotWebConfNumberParameter("temperature trigger", "tempTriggerParam", tempDiffTriggerStr, 32, "0.125", "e.g. 0.125", "step='0.0625'");
+
 IotWebConfParameterGroup miscGroup = IotWebConfParameterGroup("misc", "misc.");
 iotwebconf::SelectTParameter<STRING_LEN> languParam =
     iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("languParam").label("language").optionValues((const char *)languValues).optionNames((const char *)languNames).optionCount(sizeof(languValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("0").build();
@@ -435,6 +442,9 @@ void handleRoot()
   s += "<td>";
   s += tempRetDiffParam.value();
   s += "&#8451;</td>";
+  s += "</tr><tr>";
+  s += "<td>detected devices: </td>";
+  s += "<td>" + String(sensors.getDeviceCount()) + "</td>";
   s += "</tr></table></fieldset>";
 
   s += "<fieldset id=\"status\">";
@@ -723,6 +733,12 @@ void mqttSendTopics(bool mqttInit)
     dtostrf(tempInt, 2, 2, msg_out);
     mqttTempInt = tempInt;
     mqttPublish(MQTT_PUB_TEMP_INT, msg_out);
+  }
+  if (tempDiff != mqttTempDiff || mqttInit)
+  {
+    dtostrf(tempDiff, 2, 4, msg_out);
+    mqttTempDiff = tempDiff;
+    mqttPublish(MQTT_PUB_TEMP_DIFF, msg_out);
   }
   if (pumpRunning != mqttPumpRunning || mqttInit)
   {
@@ -1295,18 +1311,17 @@ void check()
     }
     else if (!pumpManual)
     {
-      float temperatur_delta = 0.0;
       if (++checkCnt >= 5)
         checkCnt = 0; // Reset counter
       t[checkCnt] = tempOut;
       int cnt_alt = (checkCnt + 6) % 5;
-      temperatur_delta = t[checkCnt] - t[cnt_alt]; // Difference to 5 sec before
+      tempDiff = t[checkCnt] - t[cnt_alt]; // Difference to 5 sec before
       if (!pumpRunning)
       {
-        if ((((temperatur_delta >= tempTriggerParam.value() && (mqttHeaterStatus || !mqttClient.connected())) || mqttPump) && (300000 < millis() - pumpBlock || pumpFirstCall)) || 86400000 < millis() - pumpStartedAt)
-        { // smallest temp change is 0,12°C,
+        if ((((tempDiff >= tempDiffTrigger && (mqttHeaterStatus || !mqttClient.connected())) || mqttPump) && (300000 < millis() - pumpBlock || pumpFirstCall)) || 86400000 < millis() - pumpStartedAt)
+        { // smallest temp change is 0,0625°C,
           Serial.print("Temperature Delta: ");
-          Serial.println(temperatur_delta);
+          Serial.println(tempDiff);
           if (mqttPump)
           {
             mqttPump = false;
@@ -1317,7 +1332,7 @@ void check()
           pumpOn();
         }
       }
-      else if (tempRet > (tempOut - tempRetDiffParam.value()) && !(temperatur_delta >= tempTriggerParam.value()) && 120000 < (millis() - pumpStartedAt))
+      else if (tempRet > (tempOut - tempRetDiffParam.value()) && !(tempDiff >= tempDiffTrigger) && 120000 < (millis() - pumpStartedAt))
       { // if return flow temp near temp out stop pump with a delay of 2 minutes and other rules
         pumpOff();
       }
@@ -1329,13 +1344,12 @@ void onSecTimer()
 {
   updateTime();
   check();
+  mqttSendTopics();
 }
 
 void onSec10Timer()
 {
-  detectSensors();
   checkSensors();
-  mqttSendTopics();
 }
 
 void onMin10Timer()
@@ -1430,15 +1444,20 @@ void setup()
   }
 
   langu = atoi(languParam.value());
+  tempDiffTrigger = atof(tempTriggerParam.valueBuffer);
+  Serial.print("Trigger set to: ");
+  Serial.println(tempDiffTrigger);
   // -- Set up required URL handlers on the web server.
   server.on("/", handleRoot);
-  server.on("/config", []
-            { iotWebConf.handleConfig(); });
+  server.on("/config", [] { // detectSensors();
+    iotWebConf.handleConfig();
+  });
   server.onNotFound([]()
                     { iotWebConf.handleNotFound(); });
   server.on("/coredump", handleCoreDump);
   server.on("/deletecoredump", handleDeleteCoreDump);
   server.on("/crash", startCrash); // Adress to create a coredump for testing
+  // TODO: detectSensors per Link aufrufen
   Serial.println("Wifi manager ready.");
 
   strcpy(mqttWillTopic, mqttTopicPath);
