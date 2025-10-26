@@ -149,8 +149,8 @@ IotWebConfTextParameter mqttPumpTopicParam = IotWebConfTextParameter("external p
 IotWebConfTextParameter mqttPumpValueParam = IotWebConfTextParameter("external pump start Value", "mqttPumpValue", mqttPumpValue, STRING_LEN, "1");
 IotWebConfTextParameter mqttThermalDesinfectionTopicParam = IotWebConfTextParameter("thermal desinfection topic", "mqttThermalDesinfectionTopic", mqttThermalDesinfectionTopic, STRING_LEN, "ht3/hometop/ht/dhw_thermal_desinfection");
 IotWebConfTextParameter mqttThermalDesinfectionValueParam = IotWebConfTextParameter("thermal desinfection Value", "mqttThermalDesinfectionValue", mqttThermalDesinfectionValue, STRING_LEN, "1");
-IotWebConfTextParameter mqttValveTopicParam = IotWebConfTextParameter("external pump start topic", "mqttValveTopic", mqttValveTopic, STRING_LEN, "valve_trigger");
-IotWebConfTextParameter mqttValveValueParam = IotWebConfTextParameter("external pump start Value", "mqttValveValue", mqttValveValue, STRING_LEN, "1");
+IotWebConfTextParameter mqttValveTopicParam = IotWebConfTextParameter("valve topic", "mqttValveTopic", mqttValveTopic, STRING_LEN, "valve_trigger");
+IotWebConfTextParameter mqttValveValueParam = IotWebConfTextParameter("valve start Value", "mqttValveValue", mqttValveValue, STRING_LEN, "1");
 IotWebConfParameterGroup ntpGroup = IotWebConfParameterGroup("ntp", "NTP");
 IotWebConfTextParameter ntpServerParam = IotWebConfTextParameter("server", "ntpServer", ntpServer, STRING_LEN, "de.pool.ntp.org");
 IotWebConfTextParameter ntpTimezoneParam = IotWebConfTextParameter("timezone", "ntpTimezone", ntpTimezone, STRING_LEN, "CET-1CEST,M3.5.0/02,M10.5.0/03");
@@ -446,9 +446,9 @@ void handleRoot()
   else
     s += "<p>pump: stopped";
   if (mqttValve)
-    s += "<p>valve power: on";
+    s += "<p>valve: open";
   else
-    s += "<p>valve power: off";
+    s += "<p>valve power: closed";
   s += "<p><h3>" + String(nils_length(pump)) + " Last pump actions</h3>";
   for (int i = 0; i < nils_length(pump); i++)
   { // display last pumpOn Events in right order
@@ -984,7 +984,6 @@ void updateDisplay()
     else
       display.drawString(64, 24, String(txtReturn[langu]) + ": ERROR!");
 
-    display.setFont(ArialMT_Plain_16);
     display.setTextAlignment(TEXT_ALIGN_CENTER);
     if (pumpRunning)
     {
@@ -1003,13 +1002,12 @@ void updateDisplay()
         display.drawString(64, 36, String(txtPumpOff[langu]));
     }
     if (mqttValve)
-      display.drawString(64, 52, String(txtValveOn[langu]));
+      display.drawString(64, 48, String(txtValveOn[langu]));
     else
-      display.drawString(64, 52, String(txtValveOff[langu]));
+      display.drawString(64, 48, String(txtValveOff[langu]));
     break;
   case 1:
     // Display Page 2 - last 5 pump starts
-    display.setFont(ArialMT_Plain_10);
     display.setTextAlignment(TEXT_ALIGN_CENTER);
     display.drawString(64, 0, String(txtLastRuns[langu]));
     display.drawLine(0, 11, 128, 11);
