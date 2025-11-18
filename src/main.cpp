@@ -54,6 +54,14 @@ float mqttTempInt;
 float mqttTempDiff;
 unsigned int checkCnt;
 
+float valvePressure;
+bool valveOpened = false;
+unsigned long valveOpenedAt;
+unsigned long valveClosedAt;
+int valveMaxOpen;
+char valveMaxOpenStr[4];
+bool valveError = false;
+
 // Setup a oneWire instance to communicate with any OneWire devices
 OneWire oneWire(ONEWIREPIN);
 
@@ -80,9 +88,11 @@ bool needReset = false;
 #define MQTT_PORT 1883
 #define MQTT_PUB_TEMP_OUT "dhw_Tflow_measured"
 #define MQTT_PUB_TEMP_RET "dhw_Treturn"
-#define MQTT_PUB_TEMP_INT "Tint"
 #define MQTT_PUB_TEMP_DIFF "dhw_Tdelta"
+#define MQTT_PUB_TEMP_INT "Tint"
 #define MQTT_PUB_PUMP "dhw_pump_circulation"
+#define MQTT_PUB_VALVE "dhw_valve"
+#define MQTT_PUB_VALVE_ERROR "dhw_valve_error"
 #define MQTT_PUB_INFO "info"
 #define MQTT_PUB_STATUS "status"
 #define MQTT_PUB_SYSINFO "sysinfo"
@@ -101,9 +111,9 @@ char mqttPumpTopic[STRING_LEN];
 char mqttPumpValue[STRING_LEN];
 bool mqttPump = false;
 bool mqttPumpRunning = false;
-char mqttValveTopic[STRING_LEN];
-char mqttValveValue[STRING_LEN];
-bool mqttValve = false;
+bool mqttValveOpened = false;
+bool mqttValveError = false;
+char mqttValvePressureTopic[STRING_LEN];
 String mqttStatus = "";
 char mqttThermalDesinfectionTopic[STRING_LEN];
 char mqttThermalDesinfectionValue[STRING_LEN];
@@ -150,15 +160,18 @@ IotWebConfPasswordParameter mqttUserPasswordParam = IotWebConfPasswordParameter(
 IotWebConfTextParameter mqttTopicPathParam = IotWebConfTextParameter("topicpath", "mqttTopicPath", mqttTopicPath, STRING_LEN, "ww/ht/");
 IotWebConfTextParameter mqttHeaterStatusTopicParam = IotWebConfTextParameter("heater status topic", "mqttHeaterStatusTopic", mqttHeaterStatusTopic, STRING_LEN, "ht3/hometop/ht/hc1_Tniveau");
 IotWebConfTextParameter mqttHeaterStatusValueParam = IotWebConfTextParameter("heater status value", "mqttHeaterStatusValue", mqttHeaterStatusValue, STRING_LEN, "3");
-IotWebConfTextParameter mqttPumpTopicParam = IotWebConfTextParameter("external pump start topic", "mqttPumpTopic", mqttPumpTopic, STRING_LEN, "pump_trigger");
+IotWebConfTextParameter mqttPumpTopicParam = IotWebConfTextParameter("external pump start topic", "mqttPumpTopic", mqttPumpTopic, STRING_LEN, "ht3/hometop/ht/dhw_pump_circulation");
 IotWebConfTextParameter mqttPumpValueParam = IotWebConfTextParameter("external pump start Value", "mqttPumpValue", mqttPumpValue, STRING_LEN, "1");
 IotWebConfTextParameter mqttThermalDesinfectionTopicParam = IotWebConfTextParameter("thermal desinfection topic", "mqttThermalDesinfectionTopic", mqttThermalDesinfectionTopic, STRING_LEN, "ht3/hometop/ht/dhw_thermal_desinfection");
 IotWebConfTextParameter mqttThermalDesinfectionValueParam = IotWebConfTextParameter("thermal desinfection Value", "mqttThermalDesinfectionValue", mqttThermalDesinfectionValue, STRING_LEN, "1");
-IotWebConfTextParameter mqttValveTopicParam = IotWebConfTextParameter("valve topic", "mqttValveTopic", mqttValveTopic, STRING_LEN, "valve_trigger");
-IotWebConfTextParameter mqttValveValueParam = IotWebConfTextParameter("valve start Value", "mqttValveValue", mqttValveValue, STRING_LEN, "1");
+IotWebConfTextParameter mqttValvePressureTopicParam = IotWebConfTextParameter("system pressure", "mqttValvePressureTopic", mqttValvePressureTopic, STRING_LEN, "ht3/hometop/ht/ch_system_pressure");
 IotWebConfParameterGroup ntpGroup = IotWebConfParameterGroup("ntp", "NTP");
 IotWebConfTextParameter ntpServerParam = IotWebConfTextParameter("server", "ntpServer", ntpServer, STRING_LEN, "de.pool.ntp.org");
 IotWebConfTextParameter ntpTimezoneParam = IotWebConfTextParameter("timezone", "ntpTimezone", ntpTimezone, STRING_LEN, "CET-1CEST,M3.5.0/02,M10.5.0/03");
+IotWebConfParameterGroup valveGroup = IotWebConfParameterGroup("valve", "Valve");
+iotwebconf::FloatTParameter valvePressureLowParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("valuePressureLowParam").label("pressure low").defaultValue(1.0).step(0.1).placeholder("e.g. 1.0").build();
+iotwebconf::FloatTParameter valvePressureHighParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("valuePressureHighParam").label("pressure high").defaultValue(1.5).step(0.1).placeholder("e.g. 1.5").build();
+IotWebConfNumberParameter valveMaxOpenParam = IotWebConfNumberParameter("maximal valve open minutes", "valveMaxOpen", valveMaxOpenStr, 4, "0");
 IotWebConfParameterGroup tempGroup = IotWebConfParameterGroup("temp", "Temperature");
 iotwebconf::SelectTParameter<DALLASADRESS_LEN> tempOutParam =
     iotwebconf::Builder<iotwebconf::SelectTParameter<DALLASADRESS_LEN>>("tempOutParam").label("out").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / DALLASADRESS_LEN).nameLength(STRING_LEN).build();
@@ -167,8 +180,8 @@ iotwebconf::SelectTParameter<DALLASADRESS_LEN> tempRetParam =
 iotwebconf::SelectTParameter<DALLASADRESS_LEN> tempIntParam =
     iotwebconf::Builder<iotwebconf::SelectTParameter<DALLASADRESS_LEN>>("tempIntParam").label("internal").optionValues((const char *)chooserValues).optionNames((const char *)chooserNames).optionCount(sizeof(chooserValues) / DALLASADRESS_LEN).nameLength(STRING_LEN).build();
 iotwebconf::FloatTParameter tempRetDiffParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("tempRetDiffParam").label("return off diff.").defaultValue(10.0).step(0.5).placeholder("e.g. 23.4").build();
-// iotwebconf::FloatTParameter tempTriggerParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("tempTriggerParam").label("temperature trigger").defaultValue(0.125).step(0.0625).placeholder("e.g. 0.12").build();
-IotWebConfNumberParameter tempTriggerParam = IotWebConfNumberParameter("temperature trigger", "tempTriggerParam", tempDiffTriggerStr, 32, "0.125", "e.g. 0.125", "step='0.0625'");
+// iotwebconf::FloatTParameter tempDiffTriggerParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("tempDiffTriggerParam").label("temperature trigger").defaultValue(0.125).step(0.0625).placeholder("e.g. 0.12").build();
+IotWebConfNumberParameter tempDiffTriggerParam = IotWebConfNumberParameter("temperature trigger", "tempDiffTriggerParam", tempDiffTriggerStr, 32, "0.125", "e.g. 0.125", "step='0.0625'");
 
 IotWebConfParameterGroup miscGroup = IotWebConfParameterGroup("misc", "misc.");
 iotwebconf::SelectTParameter<STRING_LEN> languParam =
@@ -383,8 +396,8 @@ void handleRoot()
   s += "<td>" + String(mqttThermalDesinfectionTopicParam.label) + ": </td>";
   s += "<td>" + String(mqttThermalDesinfectionTopic) + " - " + String(mqttThermalDesinfectionValue) + "</td>";
   s += "</tr><tr>";
-  s += "<td>" + String(mqttValveTopicParam.label) + ": </td>";
-  s += "<td>" + String(mqttValveTopic) + " - " + String(mqttValveValue) + "</td>";
+  s += "<td>" + String(mqttValvePressureTopicParam.label) + ": </td>";
+  s += "<td>" + String(mqttValvePressureTopic) + "</td>";
   s += "</tr><tr>";
   s += "<td>status: </td>";
   if (mqttClient.connected())
@@ -443,22 +456,49 @@ void handleRoot()
   s += tempRetDiffParam.value();
   s += "&#8451;</td>";
   s += "</tr><tr>";
+  s += "<td>" + String(tempDiffTriggerParam.label) + ": </td>";
+  s += "<td>";
+  dtostrf(tempDiffTrigger, 2, 3, tempStr);
+  s += tempStr;
+  s += "&#8451;</td>";
+  s += "</tr><tr>";
   s += "<td>detected devices: </td>";
   s += "<td>" + String(sensors.getDeviceCount()) + "</td>";
   s += "</tr></table></fieldset>";
 
+  s += "<fieldset id=" + String(valveGroup.getId()) + ">";
+  s += "<legend>" + String(valveGroup.label) + "</legend>";
+  s += "<table border = \"0\"><tr>";
+  s += "<td>" + String(valvePressureHighParam.label) + ": </td>";
+  s += "<td>" + String(valvePressureHighParam.value()) + "</td>";
+  s += "</tr><tr>";
+  s += "<td>" + String(valvePressureLowParam.label) + ": </td>";
+  s += "<td>" + String(valvePressureLowParam.value()) + "</td>";
+  s += "</tr></table></fieldset>";
+
   s += "<fieldset id=\"status\">";
   s += "<legend>Status</legend>";
-  s += "<p>status: ";
+  s += "<p>status pump: ";
   s += getStatus();
   if (pumpRunning)
     s += "<p>pump: running";
   else
     s += "<p>pump: stopped";
-  if (mqttValve)
-    s += "<p>valve: open";
+  if (valveError)
+    s += "<p>status valve : error";
+  else
+    s += "<p>status valve : ok";
+  if (valveOpened)
+  {
+    s += "<p>valve: open (";
+    dtostrf((millis() - valueOpenedAt) / 60000.0, 2, 2, tempStr);
+    s += tempStr;
+    s += "min)";
+  }
   else
     s += "<p>valve: closed";
+  s += "<p>" + String(mqttValvePressureTopicParam.label) + ": " + String(valvePressure);
+
   s += "<p><h3>" + String(nils_length(pump)) + " Last pump actions</h3>";
   for (int i = 0; i < nils_length(pump); i++)
   { // display last pumpOn Events in right order
@@ -579,11 +619,11 @@ void onMqttConnect(bool sessionPresent)
     Serial.print("Subscribed to topic: ");
     Serial.println(String(mqttThermalDesinfectionTopic) + " - " + String(packetIdSub));
   }
-  if (strlen(mqttValveTopic) > 0)
+  if (strlen(mqttValvePressureTopic) > 0)
   {
-    packetIdSub = mqttClient.subscribe(mqttValveTopic, 2);
+    packetIdSub = mqttClient.subscribe(mqttValvePressureTopic, 2);
     Serial.print("Subscribed to topic: ");
-    Serial.println(String(mqttValveTopic) + " - " + String(packetIdSub));
+    Serial.println(String(mqttValvePressureTopic) + " - " + String(packetIdSub));
   }
   digitalWrite(LED_BUILTIN, HIGH);
   mqttSendTopics(true);
@@ -676,12 +716,11 @@ void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties 
     Serial.println(new_payload);
     mqttHeaterStatus = (strcmp(mqttHeaterStatusValue, new_payload) == 0);
   }
-  else if (strcmp(topic, mqttValveTopic) == 0)
+  else if (strcmp(topic, mqttValvePressureTopic) == 0)
   {
-    Serial.print("mqtt valve: ");
+    Serial.print("mqtt pressure: ");
     Serial.println(new_payload);
-    mqttValve = (strcmp(mqttValveValue, new_payload) == 0);
-    digitalWrite(VALVEPIN, !mqttValve);
+    valvePressure = atof(new_payload);
   }
 }
 
@@ -739,6 +778,22 @@ void mqttSendTopics(bool mqttInit)
     dtostrf(tempDiff, 2, 4, msg_out);
     mqttTempDiff = tempDiff;
     mqttPublish(MQTT_PUB_TEMP_DIFF, msg_out);
+  }
+  if (valveOpened != mqttValveOpened || mqttInit)
+  {
+    mqttValveOpened = valveOpened;
+    if (valveOpened)
+      mqttPublish(MQTT_PUB_VALVE, "1");
+    else
+      mqttPublish(MQTT_PUB_VALVE, "0");
+  }
+  if (valveError != mqttValveError || mqttInit)
+  {
+    mqttValveError = valveError;
+    if (valveError)
+      mqttPublish(MQTT_PUB_VALVE_ERROR, "1");
+    else
+      mqttPublish(MQTT_PUB_VALVE_ERROR, "0");
   }
   if (pumpRunning != mqttPumpRunning || mqttInit)
   {
@@ -1017,7 +1072,7 @@ void updateDisplay()
       else
         display.drawString(64, 36, String(txtPumpOff[langu]));
     }
-    if (mqttValve)
+    if (valveOpened)
       display.drawString(64, 48, String(txtValveOn[langu]));
     else
       display.drawString(64, 48, String(txtValveOff[langu]));
@@ -1285,7 +1340,7 @@ void pumpOff()
   mqttSendTopics();
 }
 
-void check()
+void checkPump()
 {
   getTemp();
   if (sensorError)
@@ -1340,10 +1395,55 @@ void check()
   }
 }
 
+void valveOpen()
+{
+  Serial.print("Open valve - ");
+  Serial.println(valveOpened);
+  if (!valveOpened)
+  {
+    valveOpened = true;
+    valveOpenedAt = millis();
+    valveClosedAt = 0;
+    digitalWrite(VALVEPIN, LOW);
+  }
+}
+
+void valveClose()
+{
+  Serial.print("Close valve - ");
+  Serial.println(valveOpened);
+  if (valveOpened)
+  {
+    valveOpened = false;
+    valveClosedAt = millis();
+    digitalWrite(VALVEPIN, HIGH);
+  }
+}
+
+void checkValve()
+{
+  if (!valveError && valveMaxOpen && mqttClient.connected() && valvePressure > 0)
+  {
+    if (valveOpened && ((millis() - valveOpenedAt) / 60000.0 > valveMaxOpen))
+    {
+      valveError = true;
+      valveClose();
+      return;
+    }
+    if (!valveOpened && valvePressure <= valvePressureLowParam.value())
+      valveOpen();
+    if (valveOpened && valvePressure >= valvePressureHighParam.value())
+      valveClose();
+  }
+  else if (valveOpened)
+    valveClose();
+}
+
 void onSecTimer()
 {
   updateTime();
-  check();
+  checkPump();
+  checkValve();
   mqttSendTopics();
 }
 
@@ -1402,17 +1502,20 @@ void setup()
   mqttGroup.addItem(&mqttPumpValueParam);
   mqttGroup.addItem(&mqttThermalDesinfectionTopicParam);
   mqttGroup.addItem(&mqttThermalDesinfectionValueParam);
-  mqttGroup.addItem(&mqttValveTopicParam);
-  mqttGroup.addItem(&mqttValveValueParam);
+  mqttGroup.addItem(&mqttValvePressureTopicParam);
   iotWebConf.addParameterGroup(&mqttGroup);
   ntpGroup.addItem(&ntpServerParam);
   ntpGroup.addItem(&ntpTimezoneParam);
   iotWebConf.addParameterGroup(&ntpGroup);
+  valveGroup.addItem(&valvePressureHighParam);
+  valveGroup.addItem(&valvePressureLowParam);
+  valveGroup.addItem(&valveMaxOpenParam);
+  iotWebConf.addParameterGroup(&valveGroup);
   tempGroup.addItem(&tempOutParam);
   tempGroup.addItem(&tempRetParam);
   tempGroup.addItem(&tempIntParam);
   tempGroup.addItem(&tempRetDiffParam);
-  tempGroup.addItem(&tempTriggerParam);
+  tempGroup.addItem(&tempDiffTriggerParam);
   iotWebConf.addParameterGroup(&tempGroup);
   miscGroup.addItem(&languParam);
   iotWebConf.addParameterGroup(&miscGroup);
@@ -1444,9 +1547,13 @@ void setup()
   }
 
   langu = atoi(languParam.value());
-  tempDiffTrigger = atof(tempTriggerParam.valueBuffer);
+  tempDiffTrigger = atof(tempDiffTriggerParam.valueBuffer);
   Serial.print("Trigger set to: ");
   Serial.println(tempDiffTrigger);
+  valveMaxOpen = atoi(valveMaxOpenParam.valueBuffer);
+  Serial.print("ValveMaxOpen set to: ");
+  Serial.println(valveMaxOpen);
+
   // -- Set up required URL handlers on the web server.
   server.on("/", handleRoot);
   server.on("/config", [] { // detectSensors();
