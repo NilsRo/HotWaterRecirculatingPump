@@ -458,7 +458,7 @@ void handleRoot()
   if (mqttValve)
     s += "<p>valve: open";
   else
-    s += "<p>valve power: closed";
+    s += "<p>valve: closed";
   s += "<p><h3>" + String(nils_length(pump)) + " Last pump actions</h3>";
   for (int i = 0; i < nils_length(pump); i++)
   { // display last pumpOn Events in right order
