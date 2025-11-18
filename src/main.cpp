@@ -38,16 +38,18 @@ bool pumpCntInit = true;
 static float t[] = {255.0, 255.0, 255.0, 255.0, 255.0}; // letzten 5 Temepraturwerte speichern
 bool pumpRunning = false;
 bool pumpManual = false;
-unsigned long pumpBlock = 0;
-unsigned long pumpStartedAt = 0;
-unsigned long timePressed = 0;
-unsigned long timeReleased = 0;
+unsigned long pumpBlock;
+unsigned long pumpStartedAt;
+unsigned long timePressed;
+unsigned long timeReleased;
 float tempOut;
 float tempRet;
 float tempInt;
+float tempDelta;
 float mqttTempOut;
 float mqttTempRet;
 float mqttTempInt;
+float mqttTempDelta;
 unsigned int checkCnt;
 
 // Setup a oneWire instance to communicate with any OneWire devices
@@ -62,12 +64,12 @@ bool sensorError = false;
 
 // OLED Display
 SSD1306Wire display(0x3C, SDA, SCL); // ADDRESS, SDA, SCL  -  SDA and SCL usually populate automatically based on your board's pins_arduino.h e.g. https://github.com/esp8266/Arduino/blob/master/variants/nodemcu/pins_arduino.h
-unsigned int displayPage = 0;
+unsigned int displayPage;
 unsigned int displayPageLastRuns = 1;
 bool networksPageFirstCall = true;
 bool pumpFirstCall = true;
 int displayPinState = HIGH;
-unsigned int displayPinChanged = 0;
+unsigned int displayPinChanged;
 bool displayOn = true;
 bool needReset = false;
 
@@ -76,6 +78,7 @@ bool needReset = false;
 #define MQTT_PORT 1883
 #define MQTT_PUB_TEMP_OUT "dhw_Tflow_measured"
 #define MQTT_PUB_TEMP_RET "dhw_Treturn"
+#define MQTT_PUB_TEMP_DELTA "dhw_Tdelta"
 #define MQTT_PUB_TEMP_INT "Tint"
 #define MQTT_PUB_PUMP "dhw_pump_circulation"
 #define MQTT_PUB_INFO "info"
@@ -104,6 +107,7 @@ char mqttThermalDesinfectionTopic[STRING_LEN];
 char mqttThermalDesinfectionValue[STRING_LEN];
 bool mqttThermalDesinfection = false;
 
+//TODO Ticket umbauen auf Bibliothek
 Ticker mqttReconnectTimer;
 Ticker secTimer;
 Ticker displayTimer;
@@ -724,6 +728,12 @@ void mqttSendTopics(bool mqttInit)
     mqttTempInt = tempInt;
     mqttPublish(MQTT_PUB_TEMP_INT, msg_out);
   }
+  if (tempDelta != mqttTempDelta || mqttInit)
+  {
+    dtostrf(tempDelta, 2, 2, msg_out);
+    mqttTempDelta = tempDelta;
+    mqttPublish(MQTT_PUB_TEMP_DELTA, msg_out);
+  }
   if (pumpRunning != mqttPumpRunning || mqttInit)
   {
     mqttPumpRunning = pumpRunning;
@@ -736,7 +746,7 @@ void mqttSendTopics(bool mqttInit)
   {
     mqttStatus = getStatusJson();
     mqttPublish(MQTT_PUB_SYSINFO, mqttStatus.c_str());
-  }
+  }  
   if (mqttInit)
     mqttPublishUptime();
 }
@@ -1297,18 +1307,17 @@ void check()
     }
     else if (!pumpManual)
     {
-      float temperatur_delta = 0.0;
       if (++checkCnt >= 5)
         checkCnt = 0; // Reset counter
       t[checkCnt] = tempOut;
       int cnt_alt = (checkCnt + 6) % 5;
-      temperatur_delta = t[checkCnt] - t[cnt_alt]; // Difference to 5 sec before
+      tempDelta = t[checkCnt] - t[cnt_alt]; // Difference to 5 sec before
       if (!pumpRunning)
       {
-        if ((((temperatur_delta >= tempTriggerParam.value() && (mqttHeaterStatus || !mqttClient.connected())) || mqttPump) && (300000 < millis() - pumpBlock || pumpFirstCall)) || 86400000 < millis() - pumpStartedAt)
+        if ((((tempDelta >= tempTriggerParam.value() && (mqttHeaterStatus || !mqttClient.connected())) || mqttPump) && (300000 < millis() - pumpBlock || pumpFirstCall)) || 86400000 < millis() - pumpStartedAt)
         { // smallest temp change is 0,12°C,
           Serial.print("Temperature Delta: ");
-          Serial.println(temperatur_delta);
+          Serial.println(tempDelta);
           if (mqttPump)
           {
             mqttPump = false;
@@ -1319,7 +1328,7 @@ void check()
           pumpOn();
         }
       }
-      else if (tempRet > (tempOut - tempRetDiffParam.value()) && !(temperatur_delta >= tempTriggerParam.value()) && 120000 < (millis() - pumpStartedAt))
+      else if (tempRet > (tempOut - tempRetDiffParam.value()) && !(tempDelta >= tempTriggerParam.value()) && 120000 < (millis() - pumpStartedAt))
       { // if return flow temp near temp out stop pump with a delay of 2 minutes and other rules
         pumpOff();
       }
@@ -1331,13 +1340,13 @@ void onSecTimer()
 {
   updateTime();
   check();
+  mqttSendTopics();
 }
 
 void onSec10Timer()
 {
   detectSensors();
   checkSensors();
-  mqttSendTopics();
 }
 
 void onMin10Timer()
