@@ -33,19 +33,19 @@ const int DISPLAYPIN = D5;
 const int WIFICONFIGPIN = D7;
 
 String pump[20] = {"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""};
-unsigned int pumpCnt = 0;
+unsigned int pumpCnt;
 bool pumpCntInit = true;
 static float t[] = {255.0, 255.0, 255.0, 255.0, 255.0}; // letzten 5 Temepraturwerte speichern
 bool pumpRunning = false;
 bool pumpManual = false;
-unsigned long pumpBlock = 0;
-unsigned long pumpStartedAt = 0;
-unsigned long timePressed = 0;
-unsigned long timeReleased = 0;
+unsigned long pumpBlock;
+unsigned long pumpStartedAt;
+unsigned long timePressed;
+unsigned long timeReleased;
 float tempOut;
 float tempRet;
 float tempInt;
-float tempDiff = 0.0;
+float tempDiff;
 float tempDiffTrigger;
 char tempDiffTriggerStr[32];
 float mqttTempOut;
@@ -66,12 +66,12 @@ bool sensorError = false;
 
 // OLED Display
 SSD1306Wire display(0x3C, SDA, SCL); // ADDRESS, SDA, SCL  -  SDA and SCL usually populate automatically based on your board's pins_arduino.h e.g. https://github.com/esp8266/Arduino/blob/master/variants/nodemcu/pins_arduino.h
-unsigned int displayPage = 0;
+unsigned int displayPage;
 unsigned int displayPageLastRuns = 1;
 bool networksPageFirstCall = true;
 bool pumpFirstCall = true;
 int displayPinState = HIGH;
-unsigned int displayPinChanged = 0;
+unsigned int displayPinChanged;
 bool displayOn = true;
 bool needReset = false;
 
@@ -124,17 +124,17 @@ struct tm localTime;
 
 IPAddress localIP;
 char hostname[STRING_LEN];
-unsigned long lastScan = 0;
+unsigned long lastScan;
 int networksFound;
-int networksPage = 0;
-unsigned int networksPageTotal = 0;
-unsigned long displayPageSubChange = 0;
-unsigned int langu = 0;
+int networksPage;
+unsigned int networksPageTotal;
+unsigned long displayPageSubChange;
+unsigned int langu;
 
 #define CONFIG_VERSION "6"
 Preferences preferences;
 int iotWebConfPinState = HIGH;
-unsigned long iotWebConfPinChanged = 0;
+unsigned long iotWebConfPinChanged;
 DNSServer dnsServer;
 WebServer server(80);
 HTTPUpdateServer httpUpdater;
