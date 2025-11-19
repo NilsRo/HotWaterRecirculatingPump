@@ -491,7 +491,7 @@ void handleRoot()
   if (valveOpened)
   {
     s += "<p>valve: open (";
-    dtostrf((millis() - valueOpenedAt) / 60000.0, 2, 2, tempStr);
+    dtostrf((millis() - valveOpenedAt) / 60000.0, 2, 2, tempStr);
     s += tempStr;
     s += "min)";
   }
