@@ -5,6 +5,7 @@
 #include <DallasTemperature.h>
 #include <ArduinoJson.h>
 #include <Ticker.h>
+#include <arduino-timer.h>
 #include <AsyncMqttClient.h>
 #include <SSD1306Wire.h>
 #include <ArduinoOTA.h>
@@ -120,10 +121,8 @@ char mqttThermalDesinfectionValue[STRING_LEN];
 bool mqttThermalDesinfection = false;
 
 Ticker mqttReconnectTimer;
-Ticker secTimer;
+auto timer = timer_create_default();
 Ticker displayTimer;
-Ticker sec10Timer;
-Ticker min10Timer;
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP);
@@ -1439,7 +1438,8 @@ void checkValve()
     valveClose();
 }
 
-void onSecTimer()
+/* #region Timer */
+bool onSec1Timer(void *)
 {
   updateTime();
   checkPump();
@@ -1447,15 +1447,16 @@ void onSecTimer()
   mqttSendTopics();
 }
 
-void onSec10Timer()
+bool onSec10Timer(void *)
 {
   checkSensors();
 }
 
-void onMin10Timer()
+bool onMin10Timer(void *)
 {
   mqttPublishUptime();
 }
+/* #endregion */
 
 void setup()
 {
@@ -1628,16 +1629,18 @@ void setup()
   Serial.println("OTA Ready");
 
   // Timers
-  secTimer.attach(1, onSecTimer);
-  sec10Timer.attach(10, onSec10Timer);
-  min10Timer.attach(600, onMin10Timer);
+  timer.every(1000, onSec1Timer);
+  timer.every(10000, onSec10Timer);
+  timer.every(600000, onMin10Timer);
   displayTimer.attach_ms(500, updateDisplay);
+  Serial.println("Timer ready");
 }
 
 void loop()
 {
   iotWebConf.doLoop();
   ArduinoOTA.handle();
+  timer.tick();
 
   if (needReset)
   {
