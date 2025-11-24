@@ -1548,10 +1548,10 @@ void setup()
 
   langu = atoi(languParam.value());
   tempDiffTrigger = atof(tempDiffTriggerParam.valueBuffer);
-  Serial.print("Trigger set to: ");
+  Serial.print("tempDiffTrigger set to: ");
   Serial.println(tempDiffTrigger);
   valveMaxOpen = atoi(valveMaxOpenParam.valueBuffer);
-  Serial.print("ValveMaxOpen set to: ");
+  Serial.print("valveMaxOpen set to: ");
   Serial.println(valveMaxOpen);
 
   // -- Set up required URL handlers on the web server.
