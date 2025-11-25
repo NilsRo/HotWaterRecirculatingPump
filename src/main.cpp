@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <langu.h>
 #include <esp_core_dump.h>
+#include "average.h"
 
 #define STRING_LEN 128
 #define DALLASADRESS_LEN 17
@@ -62,6 +63,7 @@ unsigned long valveClosedAt;
 int valveMaxOpen;
 char valveMaxOpenStr[4];
 bool valveError = false;
+SimpleAverage valvePressureAvg(10);
 
 // Setup a oneWire instance to communicate with any OneWire devices
 OneWire oneWire(ONEWIREPIN);
@@ -92,11 +94,12 @@ bool needReset = false;
 #define MQTT_PUB_TEMP_DIFF "dhw_Tdelta"
 #define MQTT_PUB_TEMP_INT "Tint"
 #define MQTT_PUB_PUMP "dhw_pump_circulation"
-#define MQTT_PUB_VALVE "dhw_valve"
+#define MQTT_PUB_VALVE_OPENED "dhw_valve_opened"
 #define MQTT_PUB_VALVE_ERROR "dhw_valve_error"
-#define MQTT_PUB_INFO "info"
+#define MQTT_PUB_VALVE_PRESSURE_AVG "dhw_valve_pressure_avg"
 #define MQTT_PUB_STATUS "status"
-#define MQTT_PUB_SYSINFO "sysinfo"
+#define MQTT_PUB_INFO "log/info"
+#define MQTT_PUB_SYSINFO "log/sysinfo"
 AsyncMqttClient mqttClient;
 String mqttDisconnectReason;
 char mqttDisconnectTime[40];
@@ -168,8 +171,8 @@ IotWebConfParameterGroup ntpGroup = IotWebConfParameterGroup("ntp", "NTP");
 IotWebConfTextParameter ntpServerParam = IotWebConfTextParameter("server", "ntpServer", ntpServer, STRING_LEN, "de.pool.ntp.org");
 IotWebConfTextParameter ntpTimezoneParam = IotWebConfTextParameter("timezone", "ntpTimezone", ntpTimezone, STRING_LEN, "CET-1CEST,M3.5.0/02,M10.5.0/03");
 IotWebConfParameterGroup valveGroup = IotWebConfParameterGroup("valve", "Valve");
-iotwebconf::FloatTParameter valvePressureLowParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("valuePressureLowParam").label("pressure low").defaultValue(1.0).step(0.1).placeholder("e.g. 1.0").build();
-iotwebconf::FloatTParameter valvePressureHighParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("valuePressureHighParam").label("pressure high").defaultValue(1.5).step(0.1).placeholder("e.g. 1.5").build();
+iotwebconf::FloatTParameter valvePressureLowParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("valuePressureLowParam").label("pressure low").defaultValue(1.4).step(0.1).placeholder("e.g. 1.4").build();
+iotwebconf::FloatTParameter valvePressureHighParam = iotwebconf::Builder<iotwebconf::FloatTParameter>("valuePressureHighParam").label("pressure high").defaultValue(1.6).step(0.1).placeholder("e.g. 1.6").build();
 IotWebConfNumberParameter valveMaxOpenParam = IotWebConfNumberParameter("maximal valve open minutes", "valveMaxOpen", valveMaxOpenStr, 4, "0");
 IotWebConfParameterGroup tempGroup = IotWebConfParameterGroup("temp", "Temperature");
 iotwebconf::SelectTParameter<DALLASADRESS_LEN> tempOutParam =
@@ -194,7 +197,7 @@ int mod(int x, int y)
 
 // Necessary forward declarations
 String getStatus();
-String getStatusJson();
+String getSysinfoJson();
 void mqttPublish(const char *topic, const char *payload);
 void mqttSendTopics(bool mqttInit = false);
 //--
@@ -473,6 +476,9 @@ void handleRoot()
   s += "</tr><tr>";
   s += "<td>" + String(valvePressureLowParam.label) + ": </td>";
   s += "<td>" + String(valvePressureLowParam.value()) + "</td>";
+  s += "</tr><tr>";
+  s += "<td>" + String(mqttValvePressureTopicParam.label) + ": </td>";
+  s += "<td>" + String(valvePressureAvg) + "</td>";
   s += "</tr></table></fieldset>";
 
   s += "<fieldset id=\"status\">";
@@ -496,7 +502,6 @@ void handleRoot()
   }
   else
     s += "<p>valve: closed";
-  s += "<p>" + String(mqttValvePressureTopicParam.label) + ": " + String(valvePressure);
 
   s += "<p><h3>" + String(nils_length(pump)) + " Last pump actions</h3>";
   for (int i = 0; i < nils_length(pump); i++)
@@ -782,9 +787,9 @@ void mqttSendTopics(bool mqttInit)
   {
     mqttValveOpened = valveOpened;
     if (valveOpened)
-      mqttPublish(MQTT_PUB_VALVE, "1");
+      mqttPublish(MQTT_PUB_VALVE_OPENED, "1");
     else
-      mqttPublish(MQTT_PUB_VALVE, "0");
+      mqttPublish(MQTT_PUB_VALVE_OPENED, "0");
   }
   if (valveError != mqttValveError || mqttInit)
   {
@@ -802,9 +807,9 @@ void mqttSendTopics(bool mqttInit)
     else
       mqttPublish(MQTT_PUB_PUMP, "0");
   }
-  if (getStatusJson() != mqttStatus || mqttInit)
+  if (getSysinfoJson() != mqttStatus || mqttInit)
   {
-    mqttStatus = getStatusJson();
+    mqttStatus = getSysinfoJson();
     mqttPublish(MQTT_PUB_SYSINFO, mqttStatus.c_str());
   }
   if (mqttInit)
@@ -827,29 +832,43 @@ String getStatus()
   return status;
 }
 
-String getStatusJson()
+String getSysinfoJson()
 {
   JsonObject object;
   String jsonString;
-
+//TODO: Struktur mit Ordnern versehen und optimieren
   if (pumpManual)
-    object["mode"] = "manual";
+    object["dhw"]["mode"] = "manual";
   else
   {
-    object["mode"] = "auto";
+    object["dhw"]["mode"] = "auto";
     if (sensorError)
-      object["state"] = "emergency";
+      object["dhw"]["state"] = "emergency";
     else if (mqttThermalDesinfection)
-      object["state"] = "desinfection";
+      object["dhw"]["state"] = "desinfection";
     else if (mqttHeaterStatus)
-      object["state"] = "heater on";
+      object["dhw"]["state"] = "heater on";
     else
-      object["state"] = "heater off";
+      object["dhw"]["state"] = "heater off";
   }
-  object["sensor_out_conn"] = sensors.isConnected(sensorOut_id);
-  object["sensor_ret_conn"] = sensors.isConnected(sensorRet_id);
-  object["sensor_int_present"] = sensors.isConnected(sensorInt_id);
+  object["dhw"]["sensor_out_conn"] = sensors.isConnected(sensorOut_id);
+  object["dhw"]["sensor_ret_conn"] = sensors.isConnected(sensorRet_id);
+  object["dhw"]["sensor_int_present"] = sensors.isConnected(sensorInt_id);
+
+  object["valve"]["valve_error"] = valveError;
+
+  object["sys"]["reset_reason"] = esp_reset_reason();
+  object["sys"]["reset_reason_msg"] = verbose_print_reset_reason(esp_reset_reason());
+  object["sys"]["core_dump"] = esp_core_dump_image_check();
+  // object["system"]["heap_free"] = esp_get_free_internal_heap_size();    // in bytes
+  object["sys"]["heap_min_free"] = esp_get_minimum_free_heap_size(); // in bytes
+  object["ntp"]["time_set"] = timeClient.isTimeSet();
+  object["mqtt"]["disconnect_reason"] = mqttDisconnectReason;
+  object["mqtt"]["disconnect_time"] = mqttDisconnectTime;
+  // object["mqtt"]["disconnect_timestamp"] = mqttDisconnectTimestamp;
+
   serializeJson(object, jsonString);
+  Serial.println(jsonString);
   return jsonString;
 }
 
@@ -1341,7 +1360,6 @@ void pumpOff()
 
 void checkPump()
 {
-  getTemp();
   if (sensorError)
   {
     // Emergency Mode if missing sensors
@@ -1421,17 +1439,18 @@ void valveClose()
 
 void checkValve()
 {
-  if (!valveError && valveMaxOpen && mqttClient.connected() && valvePressure > 0)
+  if (!valveError && valveMaxOpen && mqttClient.connected() && valvePressureAvg > 0.0f)
   {
-    if (valveOpened && ((millis() - valveOpenedAt) / 60000.0 > valveMaxOpen))
+    if (valveOpened && (((millis() - valveOpenedAt) / 60000.0 > valveMaxOpen) || valvePressureAvg < valvePressureLowParam.value() - 0.2f))
+    // error if valve is opened too long or if the pressure is 0.2 below low pressure setting.
     {
       valveError = true;
       valveClose();
       return;
     }
-    if (!valveOpened && valvePressure <= valvePressureLowParam.value())
+    if (!valveOpened && valvePressureAvg <= valvePressureLowParam.value())
       valveOpen();
-    if (valveOpened && valvePressure >= valvePressureHighParam.value())
+    if (valveOpened && valvePressureAvg >= valvePressureHighParam.value())
       valveClose();
   }
   else if (valveOpened)
@@ -1442,19 +1461,29 @@ void checkValve()
 bool onSec1Timer(void *)
 {
   updateTime();
+  getTemp();
   checkPump();
   checkValve();
   mqttSendTopics();
+  updateDisplay();
+
+  return true;
 }
 
 bool onSec10Timer(void *)
 {
   checkSensors();
+
+  return true;
 }
 
 bool onMin10Timer(void *)
 {
   mqttPublishUptime();
+  valvePressureAvg.addValue(valvePressure);
+  mqttPublish(MQTT_PUB_VALVE_PRESSURE_AVG, String(valvePressureAvg.getAverage()).c_str());
+
+  return true;
 }
 /* #endregion */
 
@@ -1632,7 +1661,6 @@ void setup()
   timer.every(1000, onSec1Timer);
   timer.every(10000, onSec10Timer);
   timer.every(600000, onMin10Timer);
-  displayTimer.attach_ms(500, updateDisplay);
   Serial.println("Timer ready");
 }
 
