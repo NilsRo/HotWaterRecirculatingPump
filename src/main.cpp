@@ -7,6 +7,7 @@
 #include <Ticker.h>
 #include <arduino-timer.h>
 #include <AsyncMqttClient.h>
+#include <map>
 #include <SSD1306Wire.h>
 #include <ArduinoOTA.h>
 #include <IotWebConf.h>
@@ -65,10 +66,8 @@ char valveMaxOpenStr[4];
 bool valveError = false;
 SimpleAverage valvePressureAvg(10);
 
-// Setup a oneWire instance to communicate with any OneWire devices
 OneWire oneWire(ONEWIREPIN);
 
-// Pass our oneWire reference to Dallas Temperature sensor
 DallasTemperature sensors(&oneWire);
 DeviceAddress sensorOut_id;
 DeviceAddress sensorRet_id;
@@ -86,8 +85,6 @@ unsigned int displayPinChanged;
 bool displayOn = true;
 bool needReset = false;
 
-// For a cloud MQTT broker, type the domain name
-// #define MQTT_HOST "example.com"
 #define MQTT_PORT 1883
 #define MQTT_PUB_TEMP_OUT "dhw_Tflow_measured"
 #define MQTT_PUB_TEMP_RET "dhw_Treturn"
@@ -98,11 +95,13 @@ bool needReset = false;
 #define MQTT_PUB_VALVE_ERROR "dhw_valve_error"
 #define MQTT_PUB_VALVE_PRESSURE_AVG "dhw_valve_pressure_avg"
 #define MQTT_PUB_STATUS "status"
+#define MQTT_PUB_WIFI "log/wifi"
 #define MQTT_PUB_INFO "log/info"
 #define MQTT_PUB_SYSINFO "log/sysinfo"
 AsyncMqttClient mqttClient;
 String mqttDisconnectReason;
-char mqttDisconnectTime[40];
+char mqttDisconnectTime[20];
+unsigned long mqttDisconnectTimestamp;
 char mqttServer[STRING_LEN];
 char mqttUser[STRING_LEN];
 char mqttPassword[STRING_LEN];
@@ -113,10 +112,7 @@ char mqttHeaterStatusValue[STRING_LEN];
 bool mqttHeaterStatus = true;
 char mqttPumpTopic[STRING_LEN];
 char mqttPumpValue[STRING_LEN];
-bool mqttPump = false;
-bool mqttPumpRunning = false;
-bool mqttValveOpened = false;
-bool mqttValveError = false;
+bool mqttPump;
 char mqttValvePressureTopic[STRING_LEN];
 String mqttStatus = "";
 char mqttThermalDesinfectionTopic[STRING_LEN];
@@ -194,11 +190,13 @@ int mod(int x, int y)
 {
   return x < 0 ? ((x + 1) % y) + y - 1 : x % y;
 }
+/* #endregion */
 
-// Necessary forward declarations
+/* #region Necessary forward declarations */
 String getStatus();
+String getWifiJson();
 String getSysinfoJson();
-void mqttPublish(const char *topic, const char *payload);
+void mqttPublish(const char *topic, const char *payload, bool force, bool jsonAddTimstamp);
 void mqttSendTopics(bool mqttInit = false);
 /* #endregion */
 
@@ -607,7 +605,8 @@ void onMqttConnect(bool sessionPresent)
   Serial.println("Connected to MQTT.");
   Serial.print("Session present: ");
   Serial.println(sessionPresent);
-  mqttPublish(MQTT_PUB_STATUS, "Online");
+  mqttPublish(MQTT_PUB_STATUS, "Online", true, false);
+  mqttPublish(MQTT_PUB_WIFI, getWifiJson().c_str(), true, true);
   uint16_t packetIdSub;
   if (strlen(mqttHeaterStatusTopic) > 0)
   {
@@ -660,7 +659,8 @@ void onMqttDisconnect(AsyncMqttClientDisconnectReason reason)
     mqttDisconnectReason = "MQTT_NOT_AUTHORIZED";
     break;
   }
-  strftime(mqttDisconnectTime, 40, "%d.%m.%Y %T", &localTime);
+  strftime(mqttDisconnectTime, 20, "%d.%m.%Y %T", &localTime);
+  mqttDisconnectTimestamp = timeClient.getEpochTime();
 
   Serial.printf(" [%8u] Disconnected from the broker reason = %s\n", millis(), mqttDisconnectReason.c_str());
   digitalWrite(LED_BUILTIN, LOW);
@@ -732,21 +732,47 @@ void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties 
   }
 }
 
-void mqttPublish(const char *topic, const char *payload)
+bool getMqttActive()
 {
-  std::string tempTopic;
-  tempTopic.append(mqttTopicPath);
-  tempTopic.append(topic);
-  if (mqttClient.connected())
+  return String(mqttServer).length() > 0;
+}
+
+void mqttPublish(const char *topic, const char *payload, bool force, bool jsonAddTimstamp)
+{
+  static std::map<String, String> mqttLastMessage;
+  if (getMqttActive())
   {
-    mqttClient.publish(tempTopic.c_str(), 0, true, payload);
-  }
-  else
-  {
-    Serial.print("mqtt topic could not be send: ");
-    Serial.println(tempTopic.c_str());
-    Serial.print("payload: ");
-    Serial.println(payload);
+    String topicStr = String(topic);
+    String payloadStr = String(payload);
+    String newPayloadStr = String(payload);
+    String tempTopicStr = String(mqttTopicPath) + String(topic);
+
+    if (mqttClient.connected())
+    {
+      if (mqttLastMessage[topicStr] != payloadStr || force)
+      {
+        if (jsonAddTimstamp && timeClient.isTimeSet())
+        {
+          JsonDocument object;
+          char timeStr[20];
+          strftime(timeStr, 20, "%d.%m.%Y %T", &localTime);
+          deserializeJson(object, payload);
+          object["timestamp"] = timeClient.getEpochTime();
+          object["date"] = timeStr;
+          serializeJson(object, newPayloadStr);
+        }
+        Serial.println("MQTT send: " + tempTopicStr + " = " + newPayloadStr);
+        if (mqttClient.publish(tempTopicStr.c_str(), 0, true, newPayloadStr.c_str()) > 0)
+          // TODO: Statt dem String ggf. einen Hash wegspeichern zur Optimierung der Speichernutzung
+          mqttLastMessage[topicStr] = payloadStr;
+        else
+          Serial.println("MQTT (error) not send: " + tempTopicStr + " = " + newPayloadStr);
+      }
+    }
+    else
+    {
+      Serial.println("MQTT not send: " + tempTopicStr + " = " + payloadStr);
+    }
   }
 }
 
@@ -756,67 +782,34 @@ void mqttPublishUptime()
   uptime::calculateUptime();
   sprintf(msg_out, "%04u %s %02u:%02u:%02u", uptime::getDays(), txtDays[langu], uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
   // Serial.println(msg_out);
-  mqttPublish(MQTT_PUB_INFO, msg_out);
+  mqttPublish(MQTT_PUB_INFO, msg_out, false, false);
 }
 
 void mqttSendTopics(bool mqttInit)
 {
   char msg_out[20];
-  if (tempOut != mqttTempOut || mqttInit)
-  {
     dtostrf(tempOut, 2, 2, msg_out);
-    mqttTempOut = tempOut;
-    mqttPublish(MQTT_PUB_TEMP_OUT, msg_out);
-  }
-  if (tempRet != mqttTempRet || mqttInit)
-  {
+    mqttPublish(MQTT_PUB_TEMP_OUT, msg_out, mqttInit , false);
+  
     dtostrf(tempRet, 2, 2, msg_out);
-    mqttTempRet = tempRet;
-    mqttPublish(MQTT_PUB_TEMP_RET, msg_out);
-  }
-  if (tempInt != mqttTempInt || mqttInit)
-  {
+    mqttPublish(MQTT_PUB_TEMP_RET, msg_out, mqttInit, false);
     dtostrf(tempInt, 2, 2, msg_out);
-    mqttTempInt = tempInt;
-    mqttPublish(MQTT_PUB_TEMP_INT, msg_out);
-  }
-  if (tempDiff != mqttTempDiff || mqttInit)
-  {
+    mqttPublish(MQTT_PUB_TEMP_INT, msg_out, mqttInit, false);
     dtostrf(tempDiff, 2, 4, msg_out);
-    mqttTempDiff = tempDiff;
-    mqttPublish(MQTT_PUB_TEMP_DIFF, msg_out);
-  }
-  if (valveOpened != mqttValveOpened || mqttInit)
-  {
-    mqttValveOpened = valveOpened;
+    mqttPublish(MQTT_PUB_TEMP_DIFF, msg_out, mqttInit, false);
     if (valveOpened)
-      mqttPublish(MQTT_PUB_VALVE_OPENED, "1");
+      mqttPublish(MQTT_PUB_VALVE_OPENED, "1", mqttInit, false);
     else
-      mqttPublish(MQTT_PUB_VALVE_OPENED, "0");
-  }
-  if (valveError != mqttValveError || mqttInit)
-  {
-    mqttValveError = valveError;
+      mqttPublish(MQTT_PUB_VALVE_OPENED, "0", mqttInit, false);
     if (valveError)
-      mqttPublish(MQTT_PUB_VALVE_ERROR, "1");
+      mqttPublish(MQTT_PUB_VALVE_ERROR, "1", mqttInit, false);
     else
-      mqttPublish(MQTT_PUB_VALVE_ERROR, "0");
-  }
-  if (pumpRunning != mqttPumpRunning || mqttInit)
-  {
-    mqttPumpRunning = pumpRunning;
+      mqttPublish(MQTT_PUB_VALVE_ERROR, "0", mqttInit, false);
     if (pumpRunning)
-      mqttPublish(MQTT_PUB_PUMP, "1");
+      mqttPublish(MQTT_PUB_PUMP, "1", mqttInit, false);
     else
-      mqttPublish(MQTT_PUB_PUMP, "0");
-  }
-  if (getSysinfoJson() != mqttStatus || mqttInit)
-  {
-    mqttStatus = getSysinfoJson();
-    mqttPublish(MQTT_PUB_SYSINFO, mqttStatus.c_str());
-  }
-  if (mqttInit)
-    mqttPublishUptime();
+      mqttPublish(MQTT_PUB_PUMP, "0", mqttInit, false);
+    mqttPublish(MQTT_PUB_SYSINFO, mqttStatus.c_str(), mqttInit, true);
 }
 
 String getStatus()
@@ -833,6 +826,19 @@ String getStatus()
   else
     status = "heater off";
   return status;
+}
+
+String getWifiJson()
+{
+  JsonDocument object;
+  String jsonString;
+
+  object["ssid"] = WiFi.SSID();
+  object["sta_ip"] = WiFi.localIP().toString();
+  object["rssi"] = WiFi.RSSI();
+  object["mac"] = WiFi.macAddress();
+  serializeJson(object, jsonString);
+  return jsonString;
 }
 
 String getSysinfoJson()
@@ -868,7 +874,7 @@ String getSysinfoJson()
   object["ntp"]["time_set"] = timeClient.isTimeSet();
   object["mqtt"]["disconnect_reason"] = mqttDisconnectReason;
   object["mqtt"]["disconnect_time"] = mqttDisconnectTime;
-  // object["mqtt"]["disconnect_timestamp"] = mqttDisconnectTimestamp;
+  object["mqtt"]["disconnect_timestamp"] = mqttDisconnectTimestamp;
 
   serializeJson(object, jsonString);
   Serial.println(jsonString);
@@ -958,7 +964,7 @@ void checkSensors()
   if (sensors.isConnected(sensorInt_id) && sensors.isConnected(sensorRet_id) && sensors.isConnected(sensorOut_id) && sensors.getDeviceCount() == 3)
   {
     if (sensorError)
-      mqttPublish(MQTT_PUB_INFO, "sensorerror solved");
+      mqttPublish(MQTT_PUB_INFO, "sensorerror solved", true, false);
     sensorError = false;
     sensors.setResolution(sensorOut_id, 12); // hohe Genauigkeit
     sensors.setResolution(sensorRet_id, 12); // hohe Genauigkeit
@@ -966,7 +972,7 @@ void checkSensors()
   else
   {
     info = "sensorerror - internal: " + String(sensors.isConnected(sensorInt_id)) + " return: " + String(sensors.isConnected(sensorRet_id)) + " out: " + String(sensors.isConnected(sensorOut_id));
-    mqttPublish(MQTT_PUB_INFO, info.c_str());
+    mqttPublish(MQTT_PUB_INFO, info.c_str(), true, false);
     sensorError = true;
   }
 }
@@ -1490,8 +1496,9 @@ bool onSec10Timer(void *)
 bool onMin10Timer(void *)
 {
   mqttPublishUptime();
+  mqttPublish(MQTT_PUB_WIFI, getWifiJson().c_str(), false, true);
   valvePressureAvg.addValue(valvePressure);
-  mqttPublish(MQTT_PUB_VALVE_PRESSURE_AVG, String(valvePressureAvg.getAverage()).c_str());
+  mqttPublish(MQTT_PUB_VALVE_PRESSURE_AVG, String(valvePressureAvg.getAverage()).c_str(), false, false);
 
   return true;
 }
