@@ -189,7 +189,7 @@ IotWebConfParameterGroup miscGroup = IotWebConfParameterGroup("misc", "misc.");
 iotwebconf::SelectTParameter<STRING_LEN> languParam =
     iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("languParam").label("language").optionValues((const char *)languValues).optionNames((const char *)languNames).optionCount(sizeof(languValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("0").build();
 
-// -- SECTION: Common functions
+/* #region common */
 int mod(int x, int y)
 {
   return x < 0 ? ((x + 1) % y) + y - 1 : x % y;
@@ -200,9 +200,9 @@ String getStatus();
 String getSysinfoJson();
 void mqttPublish(const char *topic, const char *payload);
 void mqttSendTopics(bool mqttInit = false);
-//--
+/* #endregion */
 
-// -- SECTION: Core Dump
+/* #region coredump */
 String verbose_print_reset_reason(esp_reset_reason_t reason)
 {
   switch (reason)
@@ -364,8 +364,9 @@ void handleDeleteCoreDump()
   s += iotWebConf.getHtmlFormatProvider()->getEnd();
   server.send(200, "text/html", s);
 }
+/* #endregion */
 
-// -- SECTION: Wifi Manager
+/* #region WIFI Manager */
 void handleRoot()
 {
   // -- Let IotWebConf test and handle captive portal requests.
@@ -563,14 +564,15 @@ bool formValidator(iotwebconf::WebRequestWrapper *webRequestWrapper)
   return valid;
 }
 
-//-- SECTION: connection handling
 void setTimezone(String timezone)
 {
   Serial.printf("  Setting Timezone to %s\n", ntpTimezone);
   setenv("TZ", ntpTimezone, 1); //  Now adjust the TZ.  Clock settings are adjusted to show the new local time
   tzset();
 }
+/* #endregion */
 
+/* #region connection handling */
 void connectToMqtt()
 {
   if (strlen(mqttServer) > 0)
@@ -597,7 +599,9 @@ void onWifiDisconnect(WiFiEvent_t event, WiFiEventInfo_t info)
   // ArduinoOTA.end();  TODO: Fehler untersuchen, dumped.
   Serial.println("TCP services stopped.");
 }
+/* #endregion */
 
+/* #region MQTT */
 void onMqttConnect(bool sessionPresent)
 {
   Serial.println("Connected to MQTT.");
@@ -745,7 +749,6 @@ void mqttPublish(const char *topic, const char *payload)
     Serial.println(payload);
   }
 }
-//-- END SECTION: connection handling
 
 void mqttPublishUptime()
 {
@@ -871,7 +874,9 @@ String getSysinfoJson()
   Serial.println(jsonString);
   return jsonString;
 }
+/* #endregion */
 
+/* #region Sensors */
 void printAddress(DeviceAddress deviceAddress)
 {
   for (uint8_t i = 0; i < 8; i++)
@@ -988,7 +993,9 @@ void getTemp()
   // Serial.print(" Temp Int: ");
   // Serial.println(tempInt);
 }
+/* #endregion */
 
+/* #region Display */
 void getLocalTime()
 {
   struct tm timeinfo;
@@ -1330,7 +1337,9 @@ void updateDisplay()
   }
   display.display();
 }
+/* #endregion */
 
+/* #region control logic */
 void pumpOn()
 {
   char tempStr[128];
@@ -1456,6 +1465,7 @@ void checkValve()
   else if (valveOpened)
     valveClose();
 }
+/* #endregion */
 
 /* #region Timer */
 bool onSec1Timer(void *)
