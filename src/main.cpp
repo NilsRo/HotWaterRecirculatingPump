@@ -477,7 +477,7 @@ void handleRoot()
   s += "<td>" + String(valvePressureLowParam.value()) + "</td>";
   s += "</tr><tr>";
   s += "<td>" + String(mqttValvePressureTopicParam.label) + ": </td>";
-  s += "<td>" + String(valvePressureAvg) + "</td>";
+  s += "<td>" + String(valvePressure) + " / " + String(valvePressureAvg) + " avg. </td>";
   s += "</tr></table></fieldset>";
 
   s += "<fieldset id=\"status\">";
@@ -786,27 +786,27 @@ void mqttPublishUptime()
 void mqttSendTopics(bool mqttInit)
 {
   char msg_out[20];
-    dtostrf(tempOut, 2, 2, msg_out);
-    mqttPublish(MQTT_PUB_TEMP_OUT, msg_out, mqttInit , false);
-      dtostrf(tempRet, 2, 2, msg_out);
-    mqttPublish(MQTT_PUB_TEMP_RET, msg_out, mqttInit, false);
-    dtostrf(tempInt, 2, 2, msg_out);
-    mqttPublish(MQTT_PUB_TEMP_INT, msg_out, mqttInit, false);
-    dtostrf(tempDiff, 2, 4, msg_out);
-    mqttPublish(MQTT_PUB_TEMP_DIFF, msg_out, mqttInit, false);
-    if (valveOpened)
-      mqttPublish(MQTT_PUB_VALVE_OPENED, "1", mqttInit, false);
-    else
-      mqttPublish(MQTT_PUB_VALVE_OPENED, "0", mqttInit, false);
-    if (valveError)
-      mqttPublish(MQTT_PUB_VALVE_ERROR, "1", mqttInit, false);
-    else
-      mqttPublish(MQTT_PUB_VALVE_ERROR, "0", mqttInit, false);
-    if (pumpRunning)
-      mqttPublish(MQTT_PUB_PUMP, "1", mqttInit, false);
-    else
-      mqttPublish(MQTT_PUB_PUMP, "0", mqttInit, false);
-    mqttPublish(MQTT_PUB_SYSINFO, getSysinfoJson().c_str(), mqttInit, true);
+  dtostrf(tempOut, 2, 2, msg_out);
+  mqttPublish(MQTT_PUB_TEMP_OUT, msg_out, mqttInit, false);
+  dtostrf(tempRet, 2, 2, msg_out);
+  mqttPublish(MQTT_PUB_TEMP_RET, msg_out, mqttInit, false);
+  dtostrf(tempInt, 2, 2, msg_out);
+  mqttPublish(MQTT_PUB_TEMP_INT, msg_out, mqttInit, false);
+  dtostrf(tempDiff, 2, 4, msg_out);
+  mqttPublish(MQTT_PUB_TEMP_DIFF, msg_out, mqttInit, false);
+  if (valveOpened)
+    mqttPublish(MQTT_PUB_VALVE_OPENED, "1", mqttInit, false);
+  else
+    mqttPublish(MQTT_PUB_VALVE_OPENED, "0", mqttInit, false);
+  if (valveError)
+    mqttPublish(MQTT_PUB_VALVE_ERROR, "1", mqttInit, false);
+  else
+    mqttPublish(MQTT_PUB_VALVE_ERROR, "0", mqttInit, false);
+  if (pumpRunning)
+    mqttPublish(MQTT_PUB_PUMP, "1", mqttInit, false);
+  else
+    mqttPublish(MQTT_PUB_PUMP, "0", mqttInit, false);
+  mqttPublish(MQTT_PUB_SYSINFO, getSysinfoJson().c_str(), mqttInit, true);
 }
 
 String getStatus()
@@ -842,7 +842,7 @@ String getSysinfoJson()
 {
   JsonDocument object;
   String jsonString;
-//TODO: Struktur mit Ordnern versehen und optimieren
+  // TODO: Struktur mit Ordnern versehen und optimieren
   if (pumpManual)
     object["dhw"]["mode"] = "manual";
   else
