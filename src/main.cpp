@@ -876,7 +876,6 @@ String getSysinfoJson()
   object["mqtt"]["disconnect_timestamp"] = mqttDisconnectTimestamp;
 
   serializeJson(object, jsonString);
-  Serial.println(jsonString);
   return jsonString;
 }
 /* #endregion */
