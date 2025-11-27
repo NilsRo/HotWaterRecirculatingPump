@@ -709,7 +709,6 @@ void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties 
   if (strcmp(topic, mqttPumpTopic) == 0)
   {
     Serial.print("mqtt pump: ");
-    Serial.println(new_payload);
     mqttPump = (strcmp(mqttPumpValue, new_payload) == 0);
   }
   else if (strcmp(topic, mqttThermalDesinfectionTopic) == 0)
@@ -721,15 +720,16 @@ void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties 
   else if (strcmp(topic, mqttHeaterStatusTopic) == 0)
   {
     Serial.print("mqtt heater status: ");
-    Serial.println(new_payload);
     mqttHeaterStatus = (strcmp(mqttHeaterStatusValue, new_payload) == 0);
   }
   else if (strcmp(topic, mqttValvePressureTopic) == 0)
   {
     Serial.print("mqtt pressure: ");
-    Serial.println(new_payload);
     valvePressure = atof(new_payload);
+    Serial.print("MQTT Pressvalue parsed: ");
+    Serial.print(valvePressure);
   }
+  Serial.println(new_payload);
 }
 
 bool getMqttActive()
@@ -790,8 +790,7 @@ void mqttSendTopics(bool mqttInit)
   char msg_out[20];
     dtostrf(tempOut, 2, 2, msg_out);
     mqttPublish(MQTT_PUB_TEMP_OUT, msg_out, mqttInit , false);
-  
-    dtostrf(tempRet, 2, 2, msg_out);
+      dtostrf(tempRet, 2, 2, msg_out);
     mqttPublish(MQTT_PUB_TEMP_RET, msg_out, mqttInit, false);
     dtostrf(tempInt, 2, 2, msg_out);
     mqttPublish(MQTT_PUB_TEMP_INT, msg_out, mqttInit, false);
@@ -809,7 +808,7 @@ void mqttSendTopics(bool mqttInit)
       mqttPublish(MQTT_PUB_PUMP, "1", mqttInit, false);
     else
       mqttPublish(MQTT_PUB_PUMP, "0", mqttInit, false);
-    mqttPublish(MQTT_PUB_SYSINFO, mqttStatus.c_str(), mqttInit, true);
+    mqttPublish(MQTT_PUB_SYSINFO, getSysinfoJson().c_str(), mqttInit, true);
 }
 
 String getStatus()
