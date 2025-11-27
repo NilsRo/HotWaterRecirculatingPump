@@ -726,8 +726,6 @@ void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties 
   {
     Serial.print("mqtt pressure: ");
     valvePressure = atof(new_payload);
-    Serial.print("MQTT Pressvalue parsed: ");
-    Serial.print(valvePressure);
   }
   Serial.println(new_payload);
 }
@@ -842,7 +840,7 @@ String getWifiJson()
 
 String getSysinfoJson()
 {
-  JsonObject object;
+  JsonDocument object;
   String jsonString;
 //TODO: Struktur mit Ordnern versehen und optimieren
   if (pumpManual)
@@ -1491,10 +1489,12 @@ bool onSec10Timer(void *)
   return true;
 }
 
-bool onMin10Timer(void *)
+bool onMin1Timer(void *)
 {
   mqttPublishUptime();
   mqttPublish(MQTT_PUB_WIFI, getWifiJson().c_str(), false, true);
+  Serial.print("Add pressure to calc: ");
+  Serial.println(valvePressure);
   valvePressureAvg.addValue(valvePressure);
   mqttPublish(MQTT_PUB_VALVE_PRESSURE_AVG, String(valvePressureAvg.getAverage()).c_str(), false, false);
 
@@ -1675,7 +1675,7 @@ void setup()
   // Timers
   timer.every(1000, onSec1Timer);
   timer.every(10000, onSec10Timer);
-  timer.every(600000, onMin10Timer);
+  timer.every(60000, onMin1Timer);
   Serial.println("Timer ready");
 }
 
