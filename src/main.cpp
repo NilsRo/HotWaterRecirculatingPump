@@ -64,7 +64,7 @@ unsigned long valveOpenedAt;
 unsigned long valveOpenedAt_ts;
 unsigned long valveClosedAt;
 unsigned long valveClosedAt_ts;
-unsigned long valveOpenedForSec;
+unsigned long valveSecToRefill;
 int valveMaxOpen;
 char valveMaxOpenStr[4];
 bool valveError = false;
@@ -96,7 +96,8 @@ bool needReset = false;
 #define MQTT_PUB_TEMP_INT "Tint"
 #define MQTT_PUB_PUMP "dhw_pump_circulation"
 #define MQTT_PUB_VALVE_OPENED "dhw_valve_opened"
-#define MQTT_PUB_VALVE_OPENED_FOR_SEC "dhw_valve_opened_for_sec"
+#define MQTT_PUB_VALVE_SEC_OPENED "dhw_valve_sec_opened"
+#define MQTT_PUB_VALVE_SEC_TO_REFILL "dhw_valve_sec_to_refill"
 #define MQTT_PUB_VALVE_ERROR "dhw_valve_error"
 #define MQTT_PUB_VALVE_PRESSURE_AVG "dhw_valve_pressure_avg"
 #define MQTT_PUB_STATUS "status"
@@ -526,7 +527,7 @@ void handleRoot()
   if (valveOpened)
   {
     s += "<p>valve: open (";
-    dtostrf((millis() - valveOpenedAt) / 60000.0, 2, 2, tempStr);
+    dtostrf((millis() - valveOpenedAt) / 60000.0, 4, 0, tempStr);
     s += tempStr;
     s += "min)";
   }
@@ -915,9 +916,9 @@ String getSysinfoJson()
     else
       object["dhw"]["state"] = "heater off";
   }
-  object["dhw"]["sensor_out_conn"] = sensors.isConnected(sensorOut_id);
-  object["dhw"]["sensor_ret_conn"] = sensors.isConnected(sensorRet_id);
-  object["dhw"]["sensor_int_present"] = sensors.isConnected(sensorInt_id);
+  object["dhw"]["sensor_out_connected"] = sensors.isConnected(sensorOut_id);
+  object["dhw"]["sensor_ret_connected"] = sensors.isConnected(sensorRet_id);
+  object["dhw"]["sensor_int_connected"] = sensors.isConnected(sensorInt_id);
 
   object["valve"]["valve_error"] = valveError;
 
@@ -1488,12 +1489,11 @@ void valveOpen()
   if (!valveOpened)
   {
     valveOpened = true;
-    valveOpenedForSec = valveOpenedAt_ts - valveClosedAt_ts;
-    mqttPublish(MQTT_PUB_VALVE_OPENED_FOR_SEC, String(valveOpenedForSec).c_str(), true, false);
     valveOpenedAt = millis();
-    saveValveTimestampNvs("valveOpenedAt", valveOpenedAt);
+    saveValveTimestampNvs("valveOpenedAt", valveOpenedAt);    
     valveOpenedAt_ts = timeClient.getEpochTime();
     saveValveTimestampNvs("valveOpenedAt_ts", valveOpenedAt_ts);
+    mqttPublish(MQTT_PUB_VALVE_SEC_TO_REFILL, String(valveOpenedAt_ts - valveClosedAt_ts).c_str(), true, false);
     valveClosedAt = 0;
     digitalWrite(VALVEPIN, LOW);
   }
@@ -1509,7 +1509,7 @@ void valveClose()
     valveClosedAt = millis();
     saveValveTimestampNvs("valveClosedAt", valveClosedAt);
     valveClosedAt_ts = timeClient.getEpochTime();
-
+    mqttPublish(MQTT_PUB_VALVE_SEC_OPENED, String((valveOpenedAt - valveClosedAt) / 1000).c_str(), true, false);
     saveValveTimestampNvs("valveClosedAt_ts", valveClosedAt_ts);
     digitalWrite(VALVEPIN, HIGH);
   }
@@ -1519,7 +1519,7 @@ void checkValve()
 {
   if (!valveError && valveMaxOpen && mqttClient.connected() && valvePressureAvg > 0.0f)
   {
-    if (valveOpened && (((millis() - valveOpenedAt) / 60000.0 > valveMaxOpen) || valvePressureAvg < valvePressureLowParam.value() - 0.2f))
+    if (valveOpened && (((millis() - valveOpenedAt) / 60000.0 > valveMaxOpen) || valvePressureAvg <= valvePressureLowParam.value() - 0.2f))
     // error if valve is opened too long or if the pressure is 0.2 below low pressure setting.
     {
       valveError = true;
