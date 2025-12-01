@@ -1158,9 +1158,9 @@ void updateDisplay()
         display.drawString(64, 36, String(txtPumpOff[langu]));
     }
     if (valveOpened)
-      display.drawString(64, 48, String(txtValveOn[langu]));
+      display.drawString(64, 48, String(txtValveOn[langu]) + ": " + String(valvePressureAvg) + " Bar");
     else
-      display.drawString(64, 48, String(txtValveOff[langu]));
+      display.drawString(64, 48, String(txtValveOff[langu]) + ": " + String(valvePressureAvg) + " Bar");
     break;
   case 1:
     // Display Page 2 - last 5 pump starts
