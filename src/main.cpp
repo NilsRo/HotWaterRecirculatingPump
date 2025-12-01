@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <Preferences.h>
+#include <nvs.h>
 #include <WiFi.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
@@ -60,7 +61,10 @@ unsigned int checkCnt;
 float valvePressure;
 bool valveOpened = false;
 unsigned long valveOpenedAt;
+unsigned long valveOpenedAt_ts;
 unsigned long valveClosedAt;
+unsigned long valveClosedAt_ts;
+unsigned long valveOpenedForSec;
 int valveMaxOpen;
 char valveMaxOpenStr[4];
 bool valveError = false;
@@ -92,6 +96,7 @@ bool needReset = false;
 #define MQTT_PUB_TEMP_INT "Tint"
 #define MQTT_PUB_PUMP "dhw_pump_circulation"
 #define MQTT_PUB_VALVE_OPENED "dhw_valve_opened"
+#define MQTT_PUB_VALVE_OPENED_FOR_SEC "dhw_valve_opened_for_sec"
 #define MQTT_PUB_VALVE_ERROR "dhw_valve_error"
 #define MQTT_PUB_VALVE_PRESSURE_AVG "dhw_valve_pressure_avg"
 #define MQTT_PUB_STATUS "status"
@@ -364,6 +369,32 @@ void handleDeleteCoreDump()
 }
 /* #endregion */
 
+/* #region NVS handling*/
+void changeNvsMode(bool readOnly)
+{
+  static bool nvsStatus = false;
+  if (nvsStatus)
+  {
+    preferences.end();
+  }
+  if (preferences.begin("settings", readOnly))
+    nvsStatus = true;
+  else
+  {
+    Serial.println("Error opening NVS-Namespace");
+    for (;;)
+      ; // leere Dauerschleife -> Ende
+  }
+}
+
+void saveValveTimestampNvs(const char *prefKey, unsigned long value)
+{
+  changeNvsMode(false);
+  preferences.putULong(prefKey, value);
+  changeNvsMode(true);
+  }
+/* #endregion */
+
 /* #region WIFI Manager */
 void handleRoot()
 {
@@ -537,6 +568,33 @@ void handleRoot()
 
 void configSaved()
 {
+  // check if Wifi configration has changed - if yes, restart
+  changeNvsMode(false);
+  if (preferences.isKey("apPassword"))
+  {
+    if (strcmp(iotWebConf.getApPasswordParameter()->valueBuffer, preferences.getString("apPassword").c_str()) != 0)
+      needReset = true;
+  }
+  else
+    needReset = true;
+  if (preferences.isKey("wifiSsid"))
+  {
+    if (strcmp(iotWebConf.getWifiSsidParameter()->valueBuffer, preferences.getString("wifiSsid").c_str()) != 0)
+      needReset = true;
+  }
+  else
+    needReset = true;
+
+  if (preferences.isKey("wifiPassword"))
+  {
+    if (strcmp(iotWebConf.getWifiPasswordParameter()->valueBuffer, preferences.getString("wifiPassword").c_str()) != 0)
+      needReset = true;
+  }
+  else
+    needReset = true;
+
+  // TODO: Funktioniert mit apPasswort noch nicht immer....
+  Serial.println(iotWebConf.getApPasswordParameter()->getLength() > 0);
   if (iotWebConf.getApPasswordParameter()->getLength() > 0)
     preferences.putString("apPassword", String(iotWebConf.getApPasswordParameter()->valueBuffer));
   preferences.putString("wifiSsid", String(iotWebConf.getWifiAuthInfo().ssid));
@@ -1430,7 +1488,12 @@ void valveOpen()
   if (!valveOpened)
   {
     valveOpened = true;
+    valveOpenedForSec = valveOpenedAt_ts - valveClosedAt_ts;
+    mqttPublish(MQTT_PUB_VALVE_OPENED_FOR_SEC, String(valveOpenedForSec).c_str(), true, false);
     valveOpenedAt = millis();
+    saveValveTimestampNvs("valveOpenedAt", valveOpenedAt);
+    valveOpenedAt_ts = timeClient.getEpochTime();
+    saveValveTimestampNvs("valveOpenedAt_ts", valveOpenedAt_ts);
     valveClosedAt = 0;
     digitalWrite(VALVEPIN, LOW);
   }
@@ -1444,6 +1507,10 @@ void valveClose()
   {
     valveOpened = false;
     valveClosedAt = millis();
+    saveValveTimestampNvs("valveClosedAt", valveClosedAt);
+    valveClosedAt_ts = timeClient.getEpochTime();
+
+    saveValveTimestampNvs("valveClosedAt_ts", valveClosedAt_ts);
     digitalWrite(VALVEPIN, HIGH);
   }
 }
@@ -1525,12 +1592,24 @@ void setup()
   WiFi.onEvent(onWifiDisconnect, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   // WiFi.setTxPower(WIFI_POWER_19_5dBm);
 
-  if (!preferences.begin("wifi"))
-  {
-    Serial.println("Error opening NVS-Namespace");
-    for (;;)
-      ; // leere Dauerschleife -> Ende
-  }
+  // Start NVS configuration
+  nvs_stats_t nvs_stats;
+  nvs_get_stats(NULL, &nvs_stats);
+  Serial.println("NVS-Statistics:");
+  Serial.print("Used entries: ");
+  Serial.println(nvs_stats.used_entries);
+  Serial.print("Free entries: ");
+  Serial.println(nvs_stats.free_entries);
+  Serial.print("Total entries: ");
+  Serial.println(nvs_stats.total_entries);
+
+  changeNvsMode(false);
+  valveOpenedAt = preferences.getULong("valveOpenedAt", 0);
+  valveOpenedAt = preferences.getULong("valveOpenedAt_ts", 0);
+  valveClosedAt = preferences.getULong("valveClosedAt", 0);
+  valveClosedAt = preferences.getULong("valveClosedAt_ts", 0);
+  Serial.println("NVS loaded");
+
   iotWebConf.setupUpdateServer(
       [](const char *updatePath)
       { httpUpdater.setup(&server, updatePath); },
