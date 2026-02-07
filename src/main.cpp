@@ -68,6 +68,7 @@ unsigned long valveSecToRefill;
 int valveMaxOpen;
 char valveMaxOpenStr[4];
 bool valveError = false;
+bool valveInitFill = false;
 SimpleAverage valvePressureAvg(10);
 
 OneWire oneWire(ONEWIREPIN);
@@ -98,7 +99,6 @@ bool needReset = false;
 #define MQTT_PUB_VALVE_OPENED "dhw_valve_opened"
 #define MQTT_PUB_VALVE_SEC_OPENED "dhw_valve_sec_opened"
 #define MQTT_PUB_VALVE_SEC_TO_REFILL "dhw_valve_sec_to_refill"
-#define MQTT_PUB_VALVE_ERROR "dhw_valve_error"
 #define MQTT_PUB_VALVE_PRESSURE_AVG "dhw_valve_pressure_avg"
 #define MQTT_PUB_STATUS "status"
 #define MQTT_PUB_WIFI "log/wifi"
@@ -393,7 +393,7 @@ void saveValveTimestampNvs(const char *prefKey, unsigned long value)
   changeNvsMode(false);
   preferences.putULong(prefKey, value);
   changeNvsMode(true);
-  }
+}
 /* #endregion */
 
 /* #region WIFI Manager */
@@ -521,7 +521,7 @@ void handleRoot()
   else
     s += "<p>pump: stopped";
   if (valveError)
-    s += "<p>status valve : error";
+    s += "<p>status valve : error (<a href=/resetValveError>reset</a>)";
   else
     s += "<p>status valve : ok";
   if (valveOpened)
@@ -529,11 +529,15 @@ void handleRoot()
     s += "<p>valve: open (";
     dtostrf((millis() - valveOpenedAt) / 60000.0, 4, 0, tempStr);
     s += tempStr;
-    s += "min)";
+    s += " min)";
   }
   else
-    s += "<p>valve: closed";
-
+  {
+    s += "<p>valve: closed (opened for ";
+    dtostrf((valveClosedAt - valveOpenedAt) / 60000.0, 4, 0, tempStr);
+    s += tempStr;
+    s += " min)";
+  }
   s += "<p><h3>" + String(nils_length(pump)) + " Last pump actions</h3>";
   for (int i = 0; i < nils_length(pump); i++)
   { // display last pumpOn Events in right order
@@ -857,10 +861,6 @@ void mqttSendTopics(bool mqttInit)
     mqttPublish(MQTT_PUB_VALVE_OPENED, "1", mqttInit, false);
   else
     mqttPublish(MQTT_PUB_VALVE_OPENED, "0", mqttInit, false);
-  if (valveError)
-    mqttPublish(MQTT_PUB_VALVE_ERROR, "1", mqttInit, false);
-  else
-    mqttPublish(MQTT_PUB_VALVE_ERROR, "0", mqttInit, false);
   if (pumpRunning)
     mqttPublish(MQTT_PUB_PUMP, "1", mqttInit, false);
   else
@@ -1493,7 +1493,8 @@ void valveOpen()
     saveValveTimestampNvs("valveOpenedAt", valveOpenedAt);    
     valveOpenedAt_ts = timeClient.getEpochTime();
     saveValveTimestampNvs("valveOpenedAt_ts", valveOpenedAt_ts);
-    mqttPublish(MQTT_PUB_VALVE_SEC_TO_REFILL, String(valveOpenedAt_ts - valveClosedAt_ts).c_str(), true, false);
+    if (valveClosedAt_ts > 0)
+      mqttPublish(MQTT_PUB_VALVE_SEC_TO_REFILL, String(valveOpenedAt_ts - valveClosedAt_ts).c_str(), true, false);
     valveClosedAt = 0;
     digitalWrite(VALVEPIN, LOW);
   }
@@ -1509,7 +1510,7 @@ void valveClose()
     valveClosedAt = millis();
     saveValveTimestampNvs("valveClosedAt", valveClosedAt);
     valveClosedAt_ts = timeClient.getEpochTime();
-    mqttPublish(MQTT_PUB_VALVE_SEC_OPENED, String((valveOpenedAt - valveClosedAt) / 1000).c_str(), true, false);
+    mqttPublish(MQTT_PUB_VALVE_SEC_OPENED, String((valveClosedAt - valveOpenedAt) / 1000).c_str(), true, false);
     saveValveTimestampNvs("valveClosedAt_ts", valveClosedAt_ts);
     digitalWrite(VALVEPIN, HIGH);
   }
@@ -1519,8 +1520,8 @@ void checkValve()
 {
   if (!valveError && valveMaxOpen && mqttClient.connected() && valvePressureAvg > 0.0f)
   {
-    if (valveOpened && (((millis() - valveOpenedAt) / 60000.0 > valveMaxOpen) || valvePressureAvg <= valvePressureLowParam.value() - 0.2f))
-    // error if valve is opened too long or if the pressure is 0.2 below low pressure setting.
+    if (valveOpened && (((millis() - valveOpenedAt) / 60000.0 > valveMaxOpen) || (valvePressureAvg <= valvePressureLowParam.value() - 0.2f) && valveInitFill))
+    // error if valve is opened too long or if the pressure is 0.2 below low pressure setting for longer than quarter of the valveMaxOpen time.
     {
       valveError = true;
       valveClose();
@@ -1529,7 +1530,10 @@ void checkValve()
     if (!valveOpened && valvePressureAvg <= valvePressureLowParam.value())
       valveOpen();
     if (valveOpened && valvePressureAvg >= valvePressureHighParam.value())
+    {
       valveClose();
+      valveInitFill = false;
+    }
   }
   else if (valveOpened)
     valveClose();
@@ -1566,6 +1570,29 @@ bool onMin1Timer(void *)
   mqttPublish(MQTT_PUB_VALVE_PRESSURE_AVG, String(valvePressureAvg.getAverage()).c_str(), false, false);
 
   return true;
+}
+
+void handleResetValveError()
+{
+  valveOpenedAt = 0;
+  valveOpenedAt_ts = 0;
+  saveValveTimestampNvs("valveOpenedAt", valveOpenedAt);
+  saveValveTimestampNvs("valveOpenedAt_ts", valveOpenedAt_ts);
+  valveClosedAt = 0;
+  valveClosedAt_ts = 0;
+  saveValveTimestampNvs("valveClosedAt", valveClosedAt);
+  saveValveTimestampNvs("valveClosedAt_ts", valveClosedAt_ts);
+  valveError = false;
+  valveInitFill = true;
+
+  String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
+  s += iotWebConf.getHtmlFormatProvider()->getStyle();
+  s += "<title>Warmwater Recirculation Pump</title>";
+  s += iotWebConf.getHtmlFormatProvider()->getHeadEnd();
+  s += "Valve status reset successful.";
+  s += "<p><button type=\"button\" onclick=\"javascript:history.back()\">Back</button>";
+  s += iotWebConf.getHtmlFormatProvider()->getEnd();
+  server.send(200, "text/html", s);
 }
 /* #endregion */
 
@@ -1688,6 +1715,7 @@ void setup()
   server.on("/coredump", handleCoreDump);
   server.on("/deletecoredump", handleDeleteCoreDump);
   server.on("/crash", startCrash); // Adress to create a coredump for testing
+  server.on("/resetValveError", handleResetValveError); // Adress to create a coredump for testing
   // TODO: detectSensors per Link aufrufen
   Serial.println("Wifi manager ready.");
 
