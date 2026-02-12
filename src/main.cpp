@@ -937,6 +937,7 @@ String getSysinfoJson()
   object["dhw"]["sensor_int_connected"] = sensors.isConnected(sensorInt_id);
 
   object["valve"]["valve_error"] = valveError;
+  object["valve"]["valve_initial_fill"] = valveInitFill;
 
   object["sys"]["reset_reason"] = esp_reset_reason();
   object["sys"]["reset_reason_msg"] = verbose_print_reset_reason(esp_reset_reason());
