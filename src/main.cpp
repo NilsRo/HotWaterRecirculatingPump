@@ -70,6 +70,9 @@ char valveMaxOpenStr[4];
 bool valveError = false;
 bool valveInitFill = false;
 SimpleAverage valvePressureAvg(10);
+String valveHist[20] = {"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""};
+unsigned int valveHistCnt;
+bool valveHistCntInit = true;
 
 OneWire oneWire(ONEWIREPIN);
 
@@ -195,6 +198,12 @@ iotwebconf::SelectTParameter<STRING_LEN> languParam =
 int mod(int x, int y)
 {
   return x < 0 ? ((x + 1) % y) + y - 1 : x % y;
+}
+
+float roundTo(float value, int decimals)
+{
+  float factor = pow(10, decimals);
+  return roundf(value * factor) / factor;
 }
 /* #endregion */
 
@@ -537,6 +546,13 @@ void handleRoot()
     dtostrf((valveClosedAt - valveOpenedAt) / 60000.0, 4, 0, tempStr);
     s += tempStr;
     s += " min)";
+  }
+  s += "<p><h3>" + String(nils_length(valveHist)) + " Last valve actions</h3>";
+  for (int i = 0; i < nils_length(valveHist); i++)
+  { // display last pumpOn Events in right order
+    byte arrIndex = mod((((int)valveHistCnt) - i), nils_length(valveHist));
+    sprintf(tempStr, "%02d", i + 1);
+    s += String(tempStr) + ": " + valveHist[arrIndex] + "<br>";
   }
   s += "<p><h3>" + String(nils_length(pump)) + " Last pump actions</h3>";
   for (int i = 0; i < nils_length(pump); i++)
@@ -1484,6 +1500,8 @@ void checkPump()
 
 void valveOpen()
 {
+  char tempStr[128];
+
   Serial.print("Open valve - ");
   Serial.println(valveOpened);
   if (!valveOpened)
@@ -1497,6 +1515,14 @@ void valveOpen()
       mqttPublish(MQTT_PUB_VALVE_SEC_TO_REFILL, String(valveOpenedAt_ts - valveClosedAt_ts).c_str(), true, false);
     valveClosedAt = 0;
     digitalWrite(VALVEPIN, LOW);
+
+    strftime(tempStr, 40, "%d.%m.%Y %T", &localTime);
+    Serial.println(tempStr);
+    if (valveHistCntInit)
+      valveHistCntInit = false;
+    else if (++valveHistCnt > nils_length(valveHist) - 1)
+      valveHistCnt = 0; // Reset counter
+    valveHist[valveHistCnt] = tempStr;
   }
 }
 
@@ -1513,6 +1539,7 @@ void valveClose()
     mqttPublish(MQTT_PUB_VALVE_SEC_OPENED, String((valveClosedAt - valveOpenedAt) / 1000).c_str(), true, false);
     saveValveTimestampNvs("valveClosedAt_ts", valveClosedAt_ts);
     digitalWrite(VALVEPIN, HIGH);
+    valveHist[valveHistCnt] += " (" + String((valveClosedAt - valveOpenedAt) / 1000 / 60) + " min.)";
   }
 }
 
@@ -1527,12 +1554,16 @@ void checkValve()
       valveClose();
       return;
     }
-    if (!valveOpened && valvePressureAvg <= valvePressureLowParam.value())
+    if (!valveOpened && roundTo(valvePressureAvg, 2) <= roundTo(valvePressureLowParam.value(), 2))
+    {
       valveOpen();
-    if (valveOpened && valvePressureAvg >= valvePressureHighParam.value())
+      return;
+    }
+    if (valveOpened && roundTo(valvePressureAvg, 2) >= roundTo(valvePressureHighParam.value(), 2))
     {
       valveClose();
       valveInitFill = false;
+      return;
     }
   }
   else if (valveOpened)
