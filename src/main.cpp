@@ -49,6 +49,9 @@ unsigned long timeReleased;
 float tempOut;
 float tempRet;
 float tempInt;
+bool tempOutConnected;
+bool tempRetConnected;
+bool tempIntConnected;
 float tempDiff;
 float tempDiffTrigger;
 char tempDiffTriggerStr[32];
@@ -932,9 +935,9 @@ String getSysinfoJson()
     else
       object["dhw"]["state"] = "heater off";
   }
-  object["dhw"]["sensor_out_connected"] = sensors.isConnected(sensorOut_id);
-  object["dhw"]["sensor_ret_connected"] = sensors.isConnected(sensorRet_id);
-  object["dhw"]["sensor_int_connected"] = sensors.isConnected(sensorInt_id);
+  object["dhw"]["sensor_out_connected"] = tempOutConnected;
+  object["dhw"]["sensor_ret_connected"] = tempRetConnected;
+  object["dhw"]["sensor_int_connected"] = tempIntConnected;
 
   object["valve"]["valve_error"] = valveError;
   object["valve"]["valve_initial_fill"] = valveInitFill;
@@ -1033,17 +1036,25 @@ void detectSensors()
 void checkSensors()
 {
   String info;
-  if (sensors.isConnected(sensorInt_id) && sensors.isConnected(sensorRet_id) && sensors.isConnected(sensorOut_id) && sensors.getDeviceCount() == 3)
+  tempIntConnected = sensors.isConnected(sensorInt_id);
+  tempRetConnected = sensors.isConnected(sensorRet_id);
+  tempOutConnected = sensors.isConnected(sensorOut_id);
+
+  if (tempIntConnected && tempRetConnected && tempOutConnected)
   {
     if (sensorError)
+    {
       mqttPublish(MQTT_PUB_INFO, "sensorerror solved", true, false);
-    sensorError = false;
-    sensors.setResolution(sensorOut_id, 12); // hohe Genauigkeit
-    sensors.setResolution(sensorRet_id, 12); // hohe Genauigkeit
+      info = "sensorerror - internal: " + String(tempIntConnected) + " return: " + String(tempRetConnected) + " out: " + String(tempOutConnected);
+      mqttPublish(MQTT_PUB_INFO, info.c_str(), true, false);
+      sensorError = false;
+      sensors.setResolution(sensorOut_id, 12); // hohe Genauigkeit
+      sensors.setResolution(sensorRet_id, 12); // hohe Genauigkeit
+    }
   }
   else
   {
-    info = "sensorerror - internal: " + String(sensors.isConnected(sensorInt_id)) + " return: " + String(sensors.isConnected(sensorRet_id)) + " out: " + String(sensors.isConnected(sensorOut_id));
+    info = "sensorerror - internal: " + String(tempIntConnected) + " return: " + String(tempRetConnected) + " out: " + String(tempOutConnected);
     mqttPublish(MQTT_PUB_INFO, info.c_str(), true, false);
     sensorError = true;
   }
@@ -1052,18 +1063,10 @@ void checkSensors()
 void getTemp()
 {
   sensors.requestTemperatures(); // Send the command to get temperatures
-  if (sensors.isConnected(sensorOut_id))
-    tempOut = sensors.getTempC(sensorOut_id);
-  else
-    tempOut = 0;
-  if (sensors.isConnected(sensorRet_id))
-    tempRet = sensors.getTempC(sensorRet_id);
-  else
-    tempRet = 0;
-  if (sensors.isConnected(sensorInt_id))
-    tempInt = sensors.getTempC(sensorInt_id);
-  else
-    tempInt = 0;
+  //TODO: In Thread auslagern
+  tempOut = sensors.getTempC(sensorOut_id);
+  tempRet = sensors.getTempC(sensorRet_id);
+  tempInt = sensors.getTempC(sensorInt_id);
   // Serial.print(" Temp Out: ");
   // Serial.println(tempOut);
   // Serial.print(" Temp In: ");
@@ -1143,14 +1146,14 @@ void updateDisplay()
     display.drawLine(0, 11, 128, 11);
     display.setTextAlignment(TEXT_ALIGN_CENTER);
 
-    if (sensors.isConnected(sensorOut_id))
+    if (!sensorError)
     {
       dtostrf(tempOut, 2, 2, tempStr);
       display.drawString(64, 12, String(txtFlow[langu]) + ": " + String(tempStr) + " C°");
     }
     else
       display.drawString(64, 12, String(txtFlow[langu]) + ": ERROR!");
-    if (sensors.isConnected(sensorRet_id))
+    if (!sensorError)
     {
       dtostrf(tempRet, 2, 2, tempStr);
       display.drawString(64, 24, String(txtReturn[langu]) + ": " + String(tempStr) + " C°");
