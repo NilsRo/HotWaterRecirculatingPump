@@ -986,27 +986,45 @@ String formatAdress(DeviceAddress deviceAddress)
 /// in: valid chars are 0-9 + A-F + a-f
 /// out_len_max==0: convert until the end of input string, out_len_max>0 only convert this many numbers
 /// returns actual out size
-int hexStr2Arr(unsigned char *out, const char *in, size_t out_len_max = 0)
+int hexStr2Arr(uint8_t *out, const char *in, size_t out_len_max = 0)
 {
-  if (!out_len_max)
-    out_len_max = 2147483647; // INT_MAX
+  if (!in || !out)
+    return -1;
 
-  const int in_len = strnlen(in, out_len_max * 2);
+  const size_t in_len = strlen(in);
+
+  // Länge muss gerade sein
   if (in_len % 2 != 0)
-    return -1; // error, in str len should be even
+    return -1;
 
-  // calc actual out len
-  const int out_len = out_len_max < (in_len / 2) ? out_len_max : (in_len / 2);
+  // maximale Ausgabegröße bestimmen
+  const size_t max_out = in_len / 2;
+  const size_t out_len = (out_len_max == 0 || out_len_max > max_out)
+                             ? max_out
+                             : out_len_max;
 
-  for (int i = 0; i < out_len; i++)
+  auto hexVal = [](char c) -> int
   {
-    char ch0 = in[2 * i];
-    char ch1 = in[2 * i + 1];
-    uint8_t nib0 = (ch0 & 0xF) + (ch0 >> 6) | ((ch0 >> 3) & 0x8);
-    uint8_t nib1 = (ch1 & 0xF) + (ch1 >> 6) | ((ch1 >> 3) & 0x8);
-    out[i] = (nib0 << 4) | nib1;
+    if (c >= '0' && c <= '9')
+      return c - '0';
+    if (c >= 'A' && c <= 'F')
+      return c - 'A' + 10;
+    if (c >= 'a' && c <= 'f')
+      return c - 'a' + 10;
+    return -1; // invalid
+  };
+
+  for (size_t i = 0; i < out_len; i++)
+  {
+    int hi = hexVal(in[2 * i]);
+    int lo = hexVal(in[2 * i + 1]);
+    if (hi < 0 || lo < 0)
+      return -1; // invalid char
+
+    out[i] = (hi << 4) | lo;
   }
-  return out_len;
+
+  return (int)out_len;
 }
 
 void detectSensors()
@@ -1028,9 +1046,9 @@ void detectSensors()
     snprintf(chooserNames[i], sizeof(chooserNames[i]), "%s - %.2f C°", formatAdress(sensor_id).c_str(), sensors.getTempC(sensor_id));
     snprintf(chooserValues[i], sizeof(chooserValues[i]), "%s", formatAdress(sensor_id).c_str());
   }
-  hexStr2Arr(sensorInt_id, tempIntParam.value());
-  hexStr2Arr(sensorOut_id, tempOutParam.value());
-  hexStr2Arr(sensorRet_id, tempRetParam.value());
+  hexStr2Arr(sensorInt_id, tempIntParam.value(), 8);
+  hexStr2Arr(sensorOut_id, tempOutParam.value(), 8);
+  hexStr2Arr(sensorRet_id, tempRetParam.value(), 8);
 }
 
 void checkSensors()
