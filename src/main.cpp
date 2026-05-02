@@ -22,6 +22,8 @@
 #include <algorithm>
 #include <langu.h>
 #include <esp_core_dump.h>
+#include <esp_task_wdt.h>
+#include <esp_ota_ops.h>
 #include "average.h"
 
 #define STRING_LEN 128
@@ -29,6 +31,10 @@
 #define TEMP_QUEUE_LENGTH 1
 #define nils_length(x) ((sizeof(x) / sizeof(0 [x])) / ((size_t)(!(sizeof(x) % sizeof(0 [x])))))
 // #define nils_length( x ) ( sizeof(x) )
+
+// watchdog
+RTC_DATA_ATTR int crashCounter = 0;
+RTC_DATA_ATTR uint32_t lastCrashTime = 0;
 
 // ports
 const int ONEWIREPIN = D8;
@@ -403,6 +409,50 @@ void handleDeleteCoreDump()
 }
 /* #endregion */
 
+/* #region watchdog */
+void handleCrashCounter()
+{
+  uint32_t now = millis() / 1000; // Sekunden seit Boot
+
+  // Reset-Gründe prüfen
+  esp_reset_reason_t reason = esp_reset_reason();
+
+  bool isCrash =
+      reason == ESP_RST_TASK_WDT ||
+      reason == ESP_RST_WDT ||
+      reason == ESP_RST_PANIC ||
+      reason == ESP_RST_BROWNOUT;
+
+  if (isCrash)
+  {
+    // Wenn letzter Crash zu lange her → Counter verfallen lassen
+    if (now - lastCrashTime > 600)
+    { // 600 Sekunden = 10 Minuten
+      crashCounter = 0;
+    }
+
+    crashCounter++;
+    lastCrashTime = now;
+  }
+  else
+  {
+    // Normaler Boot → Counter verfallen lassen
+    crashCounter = 0;
+    lastCrashTime = now;
+  }
+}
+
+void checkForFailover()
+{
+  if (crashCounter >= 3)
+  {
+    const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
+    esp_ota_set_boot_partition(next);
+    esp_restart();
+  }
+}
+/* #endregion */
+
 /* #region NVS handling*/
 void changeNvsMode(bool readOnly)
 {
@@ -601,6 +651,10 @@ void handleRoot()
   // case ESP_ERR_INVALID_CRC:
   //   s += "core dump with invalid CRC - <a href=/deletecoredump>delete core dump</a>";
   // }
+  const esp_partition_t *running = esp_ota_get_running_partition();
+  s += "<p>Running partition : " + String(running->label);
+  const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
+  s += "<p>Next partition : " + String(next->label);
   s += "</fieldset>";
 
   s += "<p>Go to <a href='config'>Configuration</a>";
@@ -962,6 +1016,7 @@ String getSysinfoJson()
 
   object["sys"]["reset_reason"] = esp_reset_reason();
   object["sys"]["reset_reason_msg"] = verbose_print_reset_reason(esp_reset_reason());
+  object["sys"]["reset_crash_counter"] = crashCounter;
   // object["sys"]["core_dump"] = esp_core_dump_image_check();
   // object["system"]["heap_free"] = esp_get_free_internal_heap_size();    // in bytes
   object["sys"]["heap_min_free"] = esp_get_minimum_free_heap_size(); // in bytes
@@ -1641,6 +1696,17 @@ void setup()
   pinMode(DISPLAYPIN, INPUT_PULLUP);
   pinMode(WIFICONFIGPIN, INPUT_PULLUP);
 
+  // Watchdog für diesen Task aktivieren (5 Sekunden Timeout)
+  esp_task_wdt_config_t wdt_config = {
+      .timeout_ms = 5000,
+      .idle_core_mask = (1 << 1), // Core 1 = loopTask
+      .trigger_panic = true};
+  esp_task_wdt_init(&wdt_config);
+  esp_task_wdt_add(NULL); // current task (loopTask)
+  handleCrashCounter();
+  checkForFailover();
+  Serial.println("Watchdog initialized and crash counter checked.");
+
   display.init();
   display.setFont(ArialMT_Plain_10);
 
@@ -1788,11 +1854,13 @@ void setup()
   ArduinoOTA.onStart([]()
                      {
     Serial.println("Start OTA");
+    const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
+    esp_ota_set_boot_partition(next);
     display.displayOn();
     display.clear();
     display.setFont(ArialMT_Plain_10);
     display.setTextAlignment(TEXT_ALIGN_CENTER_BOTH);
-    display.drawString(display.getWidth() / 2, display.getHeight() / 2 - 10, "OTA Update");
+    display.drawString(display.getWidth() / 2, display.getHeight() / 2 - 10, "OTA Update -> " + String(next->label));
     display.display(); });
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total)
                         {
@@ -1825,10 +1893,15 @@ void setup()
   timer.every(10000, onSec10Timer);
   timer.every(60000, onMin1Timer);
   Serial.println("Timer ready");
+  
+
+  // Firmware als gültig markieren
+  esp_ota_mark_app_valid_cancel_rollback();
 }
 
 void loop()
 {
+  esp_task_wdt_reset();
   iotWebConf.doLoop();
   ArduinoOTA.handle();
   timer.tick();
