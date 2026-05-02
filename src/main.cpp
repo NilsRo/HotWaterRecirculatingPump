@@ -26,6 +26,7 @@
 
 #define STRING_LEN 128
 #define DALLASADRESS_LEN 17
+#define TEMP_QUEUE_LENGTH 1
 #define nils_length(x) ((sizeof(x) / sizeof(0 [x])) / ((size_t)(!(sizeof(x) % sizeof(0 [x])))))
 // #define nils_length( x ) ( sizeof(x) )
 
@@ -46,12 +47,39 @@ unsigned long pumpBlock;
 unsigned long pumpStartedAt;
 unsigned long timePressed;
 unsigned long timeReleased;
-float tempOut;
-float tempRet;
-float tempInt;
-bool tempOutConnected;
-bool tempRetConnected;
-bool tempIntConnected;
+
+// temps
+// Queue Handle
+TaskHandle_t tempTaskHandle = NULL;
+QueueHandle_t tempQueue = NULL;
+SemaphoreHandle_t tempSemaphore = NULL;
+// Typen
+typedef uint8_t DeviceAddress_t[8];
+typedef struct
+{
+  DeviceAddress_t out;
+  DeviceAddress_t ret;
+  DeviceAddress_t intl;
+} SensorIds_t;
+typedef struct
+{
+  float tempOut;
+  float tempRet;
+  float tempInt;
+  bool outConnected;
+  bool retConnected;
+  bool intConnected;
+  TickType_t timestamp; // optional
+} TempReport_t;
+
+OneWire oneWire(ONEWIREPIN);
+DallasTemperature sensors(&oneWire);
+DeviceAddress sensorOut_id;
+DeviceAddress sensorRet_id;
+DeviceAddress sensorInt_id;
+TempReport_t sensorData;
+
+bool sensorError = false;
 float tempDiff;
 float tempDiffTrigger;
 char tempDiffTriggerStr[32];
@@ -61,12 +89,13 @@ float mqttTempInt;
 float mqttTempDiff;
 unsigned int checkCnt;
 
+// valve
 float valvePressure;
-bool valveOpened = false;
-unsigned long valveOpenedAt;
-unsigned long valveOpenedAt_ts;
-unsigned long valveClosedAt;
-unsigned long valveClosedAt_ts;
+bool valveState = false;
+unsigned long valveOpenAt;
+unsigned long valveOpenAtTs;
+unsigned long valveCloseAt;
+unsigned long valveCloseAtTs;
 unsigned long valveSecToRefill;
 int valveMaxOpen;
 char valveMaxOpenStr[4];
@@ -76,14 +105,6 @@ SimpleAverage valvePressureAvg(10);
 String valveHist[20] = {"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""};
 unsigned int valveHistCnt;
 bool valveHistCntInit = true;
-
-OneWire oneWire(ONEWIREPIN);
-
-DallasTemperature sensors(&oneWire);
-DeviceAddress sensorOut_id;
-DeviceAddress sensorRet_id;
-DeviceAddress sensorInt_id;
-bool sensorError = false;
 
 // OLED Display
 SSD1306Wire display(0x3C, SDA, SCL); // ADDRESS, SDA, SCL  -  SDA and SCL usually populate automatically based on your board's pins_arduino.h e.g. https://github.com/esp8266/Arduino/blob/master/variants/nodemcu/pins_arduino.h
@@ -250,14 +271,14 @@ String verbose_print_reset_reason(esp_reset_reason_t reason)
   }
 }
 
-void initCoreDumpFlash()
-{
-  if (esp_core_dump_image_check() != ESP_OK)
-  {
-    esp_core_dump_image_erase();
-    Serial.println("Invalid core dump deleted!");
-  }
-}
+// void initCoreDumpFlash()
+// {
+//   if (esp_core_dump_image_check() != ESP_OK)
+//   {
+//     esp_core_dump_image_erase();
+//     Serial.println("Invalid core dump deleted!");
+//   }
+// }
 
 // bool checkCoreDump()
 // {
@@ -478,21 +499,21 @@ void handleRoot()
   s += "<td>" + String(tempOutParam.label) + ": </td>";
   s += "<td>";
   s += tempOutParam.value();
-  dtostrf(tempOut, 2, 2, tempStr);
+  dtostrf(sensorData.tempOut, 2, 2, tempStr);
   s += " / " + String(tempStr) + "&#8451;";
   s += "</td>";
   s += "</tr><tr>";
   s += "<td>" + String(tempRetParam.label) + ": </td>";
   s += "<td>";
   s += tempRetParam.value();
-  dtostrf(tempRet, 2, 2, tempStr);
+  dtostrf(sensorData.tempRet, 2, 2, tempStr);
   s += " / " + String(tempStr) + "&#8451;";
   s += "</td>";
   s += "</tr><tr>";
   s += "<td>" + String(tempIntParam.label) + ": </td>";
   s += "<td>";
   s += tempIntParam.value();
-  dtostrf(tempInt, 2, 2, tempStr);
+  dtostrf(sensorData.tempInt, 2, 2, tempStr);
   s += " / " + String(tempStr) + "&#8451;";
   s += "</td>";
   s += "</tr><tr>";
@@ -506,9 +527,6 @@ void handleRoot()
   dtostrf(tempDiffTrigger, 2, 3, tempStr);
   s += tempStr;
   s += "&#8451;</td>";
-  s += "</tr><tr>";
-  s += "<td>detected devices: </td>";
-  s += "<td>" + String(sensors.getDeviceCount()) + "</td>";
   s += "</tr></table></fieldset>";
 
   s += "<fieldset id=" + String(valveGroup.getId()) + ">";
@@ -536,17 +554,17 @@ void handleRoot()
     s += "<p>status valve : error (<a href=/resetValveError>reset</a>)";
   else
     s += "<p>status valve : ok";
-  if (valveOpened)
+  if (valveState)
   {
     s += "<p>valve: open (";
-    dtostrf((millis() - valveOpenedAt) / 60000.0, 4, 0, tempStr);
+    dtostrf((millis() - valveOpenAt) / 60000.0, 4, 0, tempStr);
     s += tempStr;
     s += " min)";
   }
   else
   {
     s += "<p>valve: closed (opened for ";
-    dtostrf((valveClosedAt - valveOpenedAt) / 60000.0, 4, 0, tempStr);
+    dtostrf((valveCloseAt - valveOpenAt) / 60000.0, 4, 0, tempStr);
     s += tempStr;
     s += " min)";
   }
@@ -568,21 +586,21 @@ void handleRoot()
   sprintf(tempStr, "%04u Tage %02u:%02u:%02u", uptime::getDays(), uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
   s += "<p>uptime: " + String(tempStr);
   s += "<p>last reset reason: " + verbose_print_reset_reason(esp_reset_reason());
-  s += "<p>";
-  switch (esp_core_dump_image_check())
-  {
-  case ESP_OK:
-    s += "<a href=/coredump>core dump found</a> - <a href=/deletecoredump>delete core dump</a>";
-    break;
-  case ESP_ERR_NOT_FOUND:
-    s += "no core dump found";
-    break;
-  case ESP_ERR_INVALID_SIZE:
-    s += "core dump with invalid size - <a href=/deletecoredump>delete core dump</a>";
-    break;
-  case ESP_ERR_INVALID_CRC:
-    s += "core dump with invalid CRC - <a href=/deletecoredump>delete core dump</a>";
-  }
+  // s += "<p>";
+  // switch (esp_core_dump_image_check())
+  // {
+  // case ESP_OK:
+  //   s += "<a href=/coredump>core dump found</a> - <a href=/deletecoredump>delete core dump</a>";
+  //   break;
+  // case ESP_ERR_NOT_FOUND:
+  //   s += "no core dump found";
+  //   break;
+  // case ESP_ERR_INVALID_SIZE:
+  //   s += "core dump with invalid size - <a href=/deletecoredump>delete core dump</a>";
+  //   break;
+  // case ESP_ERR_INVALID_CRC:
+  //   s += "core dump with invalid CRC - <a href=/deletecoredump>delete core dump</a>";
+  // }
   s += "</fieldset>";
 
   s += "<p>Go to <a href='config'>Configuration</a>";
@@ -868,15 +886,15 @@ void mqttPublishUptime()
 void mqttSendTopics(bool mqttInit)
 {
   char msg_out[20];
-  dtostrf(tempOut, 2, 2, msg_out);
+  dtostrf(sensorData.tempOut, 2, 2, msg_out);
   mqttPublish(MQTT_PUB_TEMP_OUT, msg_out, mqttInit, false);
-  dtostrf(tempRet, 2, 2, msg_out);
+  dtostrf(sensorData.tempRet, 2, 2, msg_out);
   mqttPublish(MQTT_PUB_TEMP_RET, msg_out, mqttInit, false);
-  dtostrf(tempInt, 2, 2, msg_out);
+  dtostrf(sensorData.tempInt, 2, 2, msg_out);
   mqttPublish(MQTT_PUB_TEMP_INT, msg_out, mqttInit, false);
   dtostrf(tempDiff, 2, 4, msg_out);
   mqttPublish(MQTT_PUB_TEMP_DIFF, msg_out, mqttInit, false);
-  if (valveOpened)
+  if (valveState)
     mqttPublish(MQTT_PUB_VALVE_OPENED, "1", mqttInit, false);
   else
     mqttPublish(MQTT_PUB_VALVE_OPENED, "0", mqttInit, false);
@@ -935,16 +953,16 @@ String getSysinfoJson()
     else
       object["dhw"]["state"] = "heater off";
   }
-  object["dhw"]["sensor_out_connected"] = tempOutConnected;
-  object["dhw"]["sensor_ret_connected"] = tempRetConnected;
-  object["dhw"]["sensor_int_connected"] = tempIntConnected;
+  object["dhw"]["sensor_out_connected"] = sensorData.outConnected;
+  object["dhw"]["sensor_ret_connected"] = sensorData.retConnected;
+  object["dhw"]["sensor_int_connected"] = sensorData.intConnected;
 
   object["valve"]["valve_error"] = valveError;
   object["valve"]["valve_initial_fill"] = valveInitFill;
 
   object["sys"]["reset_reason"] = esp_reset_reason();
   object["sys"]["reset_reason_msg"] = verbose_print_reset_reason(esp_reset_reason());
-  object["sys"]["core_dump"] = esp_core_dump_image_check();
+  // object["sys"]["core_dump"] = esp_core_dump_image_check();
   // object["system"]["heap_free"] = esp_get_free_internal_heap_size();    // in bytes
   object["sys"]["heap_min_free"] = esp_get_minimum_free_heap_size(); // in bytes
   object["ntp"]["time_set"] = timeClient.isTimeSet();
@@ -1033,6 +1051,7 @@ void detectSensors()
   // locate devices on the bus
   Serial.print("Searching devices...");
   Serial.print("Found ");
+  xSemaphoreTake(tempSemaphore, portMAX_DELAY); // Warte auf Zugriff auf Sensoren
   Serial.print(sensors.getDeviceCount(), DEC);
   Serial.println(" devices.");
 
@@ -1046,6 +1065,7 @@ void detectSensors()
     snprintf(chooserNames[i], sizeof(chooserNames[i]), "%s - %.2f C°", formatAdress(sensor_id).c_str(), sensors.getTempC(sensor_id));
     snprintf(chooserValues[i], sizeof(chooserValues[i]), "%s", formatAdress(sensor_id).c_str());
   }
+  xSemaphoreGive(tempSemaphore); // Gib Zugriff auf Sensoren frei
   hexStr2Arr(sensorInt_id, tempIntParam.value(), 8);
   hexStr2Arr(sensorOut_id, tempOutParam.value(), 8);
   hexStr2Arr(sensorRet_id, tempRetParam.value(), 8);
@@ -1054,16 +1074,13 @@ void detectSensors()
 void checkSensors()
 {
   String info;
-  tempIntConnected = sensors.isConnected(sensorInt_id);
-  tempRetConnected = sensors.isConnected(sensorRet_id);
-  tempOutConnected = sensors.isConnected(sensorOut_id);
 
-  if (tempIntConnected && tempRetConnected && tempOutConnected)
+  if (sensorData.intConnected && sensorData.retConnected && sensorData.outConnected)
   {
     if (sensorError)
     {
       mqttPublish(MQTT_PUB_INFO, "sensorerror solved", true, false);
-      info = "sensorerror - internal: " + String(tempIntConnected) + " return: " + String(tempRetConnected) + " out: " + String(tempOutConnected);
+      info = "sensorerror - internal: " + String(sensorData.intConnected) + " return: " + String(sensorData.retConnected) + " out: " + String(sensorData.outConnected);
       mqttPublish(MQTT_PUB_INFO, info.c_str(), true, false);
       sensorError = false;
       sensors.setResolution(sensorOut_id, 12); // hohe Genauigkeit
@@ -1072,26 +1089,55 @@ void checkSensors()
   }
   else
   {
-    info = "sensorerror - internal: " + String(tempIntConnected) + " return: " + String(tempRetConnected) + " out: " + String(tempOutConnected);
+    info = "sensorerror - internal: " + String(sensorData.intConnected) + " return: " + String(sensorData.retConnected) + " out: " + String(sensorData.outConnected);
     mqttPublish(MQTT_PUB_INFO, info.c_str(), true, false);
     sensorError = true;
   }
 }
 
-void getTemp()
+void tempTask(void *parameter)
 {
-  sensors.requestTemperatures(); // Send the command to get temperatures
-  //TODO: In Thread auslagern
-  tempOut = sensors.getTempC(sensorOut_id);
-  tempRet = sensors.getTempC(sensorRet_id);
-  tempInt = sensors.getTempC(sensorInt_id);
-  // Serial.print(" Temp Out: ");
-  // Serial.println(tempOut);
-  // Serial.print(" Temp In: ");
-  // Serial.println(tempRet);
-  // Serial.print(" Temp Int: ");
-  // Serial.println(tempInt);
+  // Parameter ist ein Zeiger auf heap-allokiertes SensorIds_t
+  SensorIds_t *pIds = (SensorIds_t *)parameter;
+
+  // Kopiere die IDs lokal (sicherer) und gib den übergebenen Speicher frei
+  SensorIds_t ids;
+  memcpy(ids.out, pIds->out, sizeof(DeviceAddress_t));
+  memcpy(ids.ret, pIds->ret, sizeof(DeviceAddress_t));
+  memcpy(ids.intl, pIds->intl, sizeof(DeviceAddress_t));
+  free(pIds);
+
+  TempReport_t report;
+
+  for (;;)
+  {
+    xSemaphoreTake(tempSemaphore, portMAX_DELAY); // Warte auf Zugriff auf Sensoren
+    sensors.requestTemperatures();
+    vTaskDelay(pdMS_TO_TICKS(750)); // Warte 1s nach requestTemperatures
+
+    report.tempOut = sensors.getTempC(ids.out);
+    report.tempRet = sensors.getTempC(ids.ret);
+    report.tempInt = sensors.getTempC(ids.intl);
+    xSemaphoreGive(tempSemaphore); // Gib Zugriff auf Sensoren frei
+    report.outConnected = !(report.tempOut == DEVICE_DISCONNECTED_C);
+    report.retConnected = !(report.tempRet == DEVICE_DISCONNECTED_C);
+    report.intConnected = !(report.tempInt == DEVICE_DISCONNECTED_C);
+
+    report.timestamp = xTaskGetTickCount();
+
+    // Sende in Queue, blockiere bis zu 100 ms wenn voll
+    if (tempQueue != NULL)
+    {
+      xQueueOverwrite(tempQueue, &report); // overwrite statt send, damit immer der aktuellste Wert in der Queue ist
+    }
+  }
 }
+
+void tempRead()
+{
+  xQueueReceive(tempQueue, &sensorData, 0);
+}
+
 /* #endregion */
 
 /* #region Display */
@@ -1120,9 +1166,6 @@ void updateDisplay()
   char tempStr[128];
   char uptimeStr[8];
   float temp;
-  DeviceAddress sensor1_id;
-  DeviceAddress sensor2_id;
-  DeviceAddress sensor3_id;
   unsigned long now = millis();
   unsigned int lineStart = 0;
   unsigned lineEnd = 0;
@@ -1164,16 +1207,16 @@ void updateDisplay()
     display.drawLine(0, 11, 128, 11);
     display.setTextAlignment(TEXT_ALIGN_CENTER);
 
-    if (!sensorError)
+    if (sensorData.outConnected)
     {
-      dtostrf(tempOut, 2, 2, tempStr);
+      dtostrf(sensorData.tempOut, 2, 2, tempStr);
       display.drawString(64, 12, String(txtFlow[langu]) + ": " + String(tempStr) + " C°");
     }
     else
       display.drawString(64, 12, String(txtFlow[langu]) + ": ERROR!");
-    if (!sensorError)
+    if (sensorData.retConnected)
     {
-      dtostrf(tempRet, 2, 2, tempStr);
+      dtostrf(sensorData.tempRet, 2, 2, tempStr);
       display.drawString(64, 24, String(txtReturn[langu]) + ": " + String(tempStr) + " C°");
     }
     else
@@ -1196,7 +1239,7 @@ void updateDisplay()
       else
         display.drawString(64, 36, String(txtPumpOff[langu]));
     }
-    if (valveOpened)
+    if (valveState)
       display.drawString(64, 48, String(txtValveOn[langu]) + ": " + String(valvePressureAvg) + " Bar");
     else
       display.drawString(64, 48, String(txtValveOff[langu]) + ": " + String(valvePressureAvg) + " Bar");
@@ -1241,73 +1284,6 @@ void updateDisplay()
   case 3:
     display.setFont(ArialMT_Plain_10);
     display.setTextAlignment(TEXT_ALIGN_CENTER);
-    display.drawString(64, 0, txtSensors[langu]);
-    display.drawLine(0, 11, 128, 11);
-    display.setFont(ArialMT_Plain_16);
-    if (sensors.getAddress(sensor1_id, 0))
-    {
-      temp = sensors.getTempC(sensor1_id);
-      dtostrf(temp, 2, 2, tempStr);
-      display.drawString(64, 12, "1: " + String(tempStr) + "°C");
-    }
-    else
-      display.drawString(64, 12, "1: " + String(txtNoSensor[langu]));
-    if (sensors.getAddress(sensor2_id, 1))
-    {
-      temp = sensors.getTempC(sensor2_id);
-      dtostrf(temp, 2, 2, tempStr);
-      display.drawString(64, 30, "2: " + String(tempStr) + "°C");
-    }
-    else
-      display.drawString(64, 30, "2: " + String(txtNoSensor[langu]));
-    if (sensors.getAddress(sensor3_id, 2))
-    {
-      temp = sensors.getTempC(sensor3_id);
-      dtostrf(temp, 2, 2, tempStr);
-      display.drawString(64, 48, "3: " + String(tempStr) + "°C");
-    }
-    else
-      display.drawString(64, 48, "3: " + String(txtNoSensor[langu]));
-    break;
-  case 4:
-    display.setFont(ArialMT_Plain_10);
-    display.setTextAlignment(TEXT_ALIGN_CENTER);
-    display.drawString(64, 0, String(sensors.getDeviceCount()) + " DS18B20 Device(s)");
-    display.drawLine(0, 11, 128, 11);
-    if (sensors.getAddress(sensor1_id, 0))
-    {
-      printAddress(sensor1_id);
-      display.drawString(64, 14, "1: " + formatAdress(sensor1_id));
-    }
-    else
-    {
-      Serial.println("Unable to find address for Sensor 1");
-      display.drawString(64, 14, "1: " + String(txtNoSensor[langu]));
-    }
-    if (sensors.getAddress(sensor2_id, 1))
-    {
-      printAddress(sensor2_id);
-      display.drawString(64, 32, "2: " + formatAdress(sensor2_id));
-    }
-    else
-    {
-      Serial.println("Unable to find address for Sensor 2");
-      display.drawString(64, 32, "2: " + String(txtNoSensor[langu]));
-    }
-    if (sensors.getAddress(sensor3_id, 2))
-    {
-      printAddress(sensor3_id);
-      display.drawString(64, 50, "3: " + formatAdress(sensor3_id));
-    }
-    else
-    {
-      Serial.println("Unable to find address for Sensor 3");
-      display.drawString(64, 50, "3: " + String(txtNoSensor[langu]));
-    }
-    break;
-  case 5:
-    display.setFont(ArialMT_Plain_10);
-    display.setTextAlignment(TEXT_ALIGN_CENTER);
     display.drawString(64, 0, "WiFi Status");
     display.drawLine(0, 11, 128, 11);
     switch (iotWebConf.getState())
@@ -1343,7 +1319,7 @@ void updateDisplay()
       display.drawString(64, 52, txtNoIp[langu]);
     }
     break;
-  case 6:
+  case 4:
     display.setFont(ArialMT_Plain_10);
     display.setTextAlignment(TEXT_ALIGN_CENTER);
     display.drawString(64, 0, txtWifiNetwork[langu]);
@@ -1493,7 +1469,7 @@ void checkPump()
     {
       if (++checkCnt >= 5)
         checkCnt = 0; // Reset counter
-      t[checkCnt] = tempOut;
+      t[checkCnt] = sensorData.tempOut;
       int cnt_alt = (checkCnt + 6) % 5;
       tempDiff = t[checkCnt] - t[cnt_alt]; // Difference to 5 sec before
       if (!pumpRunning)
@@ -1512,7 +1488,7 @@ void checkPump()
           pumpOn();
         }
       }
-      else if (tempRet > (tempOut - tempRetDiffParam.value()) && !(tempDiff >= tempDiffTrigger) && 120000 < (millis() - pumpStartedAt))
+      else if (sensorData.tempRet > (sensorData.tempOut - tempRetDiffParam.value()) && !(tempDiff >= tempDiffTrigger) && 120000 < (millis() - pumpStartedAt))
       { // if return flow temp near temp out stop pump with a delay of 2 minutes and other rules
         pumpOff();
       }
@@ -1525,17 +1501,17 @@ void valveOpen()
   char tempStr[128];
 
   Serial.print("Open valve - ");
-  Serial.println(valveOpened);
-  if (!valveOpened)
+  Serial.println(valveState);
+  if (!valveState)
   {
-    valveOpened = true;
-    valveOpenedAt = millis();
-    saveValveTimestampNvs("valveOpenedAt", valveOpenedAt);    
-    valveOpenedAt_ts = timeClient.getEpochTime();
-    saveValveTimestampNvs("valveOpenedAt_ts", valveOpenedAt_ts);
-    if (valveClosedAt_ts > 0)
-      mqttPublish(MQTT_PUB_VALVE_SEC_TO_REFILL, String(valveOpenedAt_ts - valveClosedAt_ts).c_str(), true, false);
-    valveClosedAt = 0;
+    valveState = true;
+    valveOpenAt = millis();
+    saveValveTimestampNvs("valveOpenAt", valveOpenAt);    
+    valveOpenAtTs = timeClient.getEpochTime();
+    saveValveTimestampNvs("valveOpenAtTs", valveOpenAtTs);
+    if (valveCloseAtTs > 0)
+      mqttPublish(MQTT_PUB_VALVE_SEC_TO_REFILL, String(valveOpenAtTs - valveCloseAtTs).c_str(), true, false);
+    valveCloseAt = 0;
     digitalWrite(VALVEPIN, LOW);
 
     strftime(tempStr, 40, "%d.%m.%Y %T", &localTime);
@@ -1551,17 +1527,17 @@ void valveOpen()
 void valveClose()
 {
   Serial.print("Close valve - ");
-  Serial.println(valveOpened);
-  if (valveOpened)
+  Serial.println(valveState);
+  if (valveState)
   {
-    valveOpened = false;
-    valveClosedAt = millis();
-    saveValveTimestampNvs("valveClosedAt", valveClosedAt);
-    valveClosedAt_ts = timeClient.getEpochTime();
-    mqttPublish(MQTT_PUB_VALVE_SEC_OPENED, String((valveClosedAt - valveOpenedAt) / 1000).c_str(), true, false);
-    saveValveTimestampNvs("valveClosedAt_ts", valveClosedAt_ts);
+    valveState = false;
+    valveCloseAt = millis();
+    saveValveTimestampNvs("valveCloseAt", valveCloseAt);
+    valveCloseAtTs = timeClient.getEpochTime();
+    mqttPublish(MQTT_PUB_VALVE_SEC_OPENED, String((valveCloseAt - valveOpenAt) / 1000).c_str(), true, false);
+    saveValveTimestampNvs("valveCloseAtTs", valveCloseAtTs);
     digitalWrite(VALVEPIN, HIGH);
-    valveHist[valveHistCnt] += " (" + String((valveClosedAt - valveOpenedAt) / 1000 / 60) + " min.)";
+    valveHist[valveHistCnt] += " (" + String((valveCloseAt - valveOpenAt) / 1000 / 60) + " min.)";
   }
 }
 
@@ -1569,26 +1545,26 @@ void checkValve()
 {
   if (!valveError && valveMaxOpen && mqttClient.connected() && valvePressureAvg > 0.0f)
   {
-    if (valveOpened && (((millis() - valveOpenedAt) / 60000.0 > valveMaxOpen) || (valvePressureAvg <= valvePressureLowParam.value() - 0.2f) && valveInitFill))
+    if (valveState && (((millis() - valveOpenAt) / 60000.0 > valveMaxOpen) || (valvePressureAvg <= valvePressureLowParam.value() - 0.2f) && valveInitFill))
     // error if valve is opened too long or if the pressure is 0.2 below low pressure setting for longer than quarter of the valveMaxOpen time.
     {
       valveError = true;
       valveClose();
       return;
     }
-    if (!valveOpened && roundTo(valvePressureAvg, 2) <= roundTo(valvePressureLowParam.value(), 2))
+    if (!valveState && roundTo(valvePressureAvg, 2) <= roundTo(valvePressureLowParam.value(), 2))
     {
       valveOpen();
       return;
     }
-    if (valveOpened && roundTo(valvePressureAvg, 2) >= roundTo(valvePressureHighParam.value(), 2))
+    if (valveState && roundTo(valvePressureAvg, 2) >= roundTo(valvePressureHighParam.value(), 2))
     {
       valveClose();
       valveInitFill = false;
       return;
     }
   }
-  else if (valveOpened)
+  else if (valveState)
     valveClose();
 }
 /* #endregion */
@@ -1597,7 +1573,7 @@ void checkValve()
 bool onSec1Timer(void *)
 {
   updateTime();
-  getTemp();
+  tempRead();
   checkPump();
   checkValve();
   mqttSendTopics();
@@ -1627,14 +1603,14 @@ bool onMin1Timer(void *)
 
 void handleResetValveError()
 {
-  valveOpenedAt = 0;
-  valveOpenedAt_ts = 0;
-  saveValveTimestampNvs("valveOpenedAt", valveOpenedAt);
-  saveValveTimestampNvs("valveOpenedAt_ts", valveOpenedAt_ts);
-  valveClosedAt = 0;
-  valveClosedAt_ts = 0;
-  saveValveTimestampNvs("valveClosedAt", valveClosedAt);
-  saveValveTimestampNvs("valveClosedAt_ts", valveClosedAt_ts);
+  valveOpenAt = 0;
+  valveOpenAtTs = 0;
+  saveValveTimestampNvs("valveOpenAt", valveOpenAt);
+  saveValveTimestampNvs("valveOpenAtTs", valveOpenAtTs);
+  valveCloseAt = 0;
+  valveCloseAtTs = 0;
+  saveValveTimestampNvs("valveCloseAt", valveCloseAt);
+  saveValveTimestampNvs("valveCloseAtTs", valveCloseAtTs);
   valveError = false;
   valveInitFill = true;
 
@@ -1654,7 +1630,7 @@ void setup()
   // basic setup
   Serial.begin(115200);
   // initCoreDumpFlash();
-  esp_core_dump_init();
+  // esp_core_dump_init();
   pinMode(LED_BUILTIN, OUTPUT);
   pinMode(PUMPPIN, OUTPUT);
   pinMode(VALVEPIN, OUTPUT);
@@ -1684,10 +1660,10 @@ void setup()
   Serial.println(nvs_stats.total_entries);
 
   changeNvsMode(false);
-  valveOpenedAt = preferences.getULong("valveOpenedAt", 0);
-  valveOpenedAt = preferences.getULong("valveOpenedAt_ts", 0);
-  valveClosedAt = preferences.getULong("valveClosedAt", 0);
-  valveClosedAt = preferences.getULong("valveClosedAt_ts", 0);
+  valveOpenAt = preferences.getULong("valveOpenAt", 0);
+  valveOpenAt = preferences.getULong("valveOpenAtTs", 0);
+  valveCloseAt = preferences.getULong("valveCloseAt", 0);
+  valveCloseAt = preferences.getULong("valveCloseAtTs", 0);
   Serial.println("NVS loaded");
 
   iotWebConf.setupUpdateServer(
@@ -1760,7 +1736,8 @@ void setup()
 
   // -- Set up required URL handlers on the web server.
   server.on("/", handleRoot);
-  server.on("/config", [] { // detectSensors();
+  server.on("/config", [] {
+    detectSensors();
     iotWebConf.handleConfig();
   });
   server.onNotFound([]()
@@ -1786,9 +1763,20 @@ void setup()
   mqttClient.setServer(mqttServer, MQTT_PORT);
   Serial.println("MQTT ready");
 
+  // start OneWire sensor reading
+  tempSemaphore = xSemaphoreCreateBinary();
+  xSemaphoreGive(tempSemaphore); // Initialisiere Semaphore als frei
+  tempQueue = xQueueCreate(TEMP_QUEUE_LENGTH, sizeof(TempReport_t));
+  sensors.setWaitForConversion(false); // wichtig für Task‑Betrieb
   sensors.begin();
   detectSensors();
-  checkSensors();
+  // Allokiere SensorIds auf dem Heap und fülle sie
+  SensorIds_t *pIds = (SensorIds_t *)malloc(sizeof(SensorIds_t));
+  memcpy(pIds->out, sensorOut_id, sizeof(DeviceAddress_t));
+  memcpy(pIds->ret, sensorRet_id, sizeof(DeviceAddress_t));
+  memcpy(pIds->intl, sensorInt_id, sizeof(DeviceAddress_t));
+  // Erstelle Tasks
+  xTaskCreatePinnedToCore(tempTask, "TempTask", 4096, pIds, 1, &tempTaskHandle, 1);
   Serial.println("Sensors ready");
 
   // configure the timezone
@@ -1903,12 +1891,12 @@ void loop()
           else
           {
             displayPageSubChange = now; // init the subpage timer
-            if (displayPage == 6)
+            if (displayPage == 4)
               displayPage = 0;
             else
               displayPage++;
 
-            if (displayPage == 6)
+            if (displayPage == 4)
             {
               if (iotWebConf.getState() != 4)
                 iotWebConf.goOffLine();
