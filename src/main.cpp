@@ -271,14 +271,14 @@ String verbose_print_reset_reason(esp_reset_reason_t reason)
   }
 }
 
-void initCoreDumpFlash()
-{
-  if (esp_core_dump_image_check() != ESP_OK)
-  {
-    esp_core_dump_image_erase();
-    Serial.println("Invalid core dump deleted!");
-  }
-}
+// void initCoreDumpFlash()
+// {
+//   if (esp_core_dump_image_check() != ESP_OK)
+//   {
+//     esp_core_dump_image_erase();
+//     Serial.println("Invalid core dump deleted!");
+//   }
+// }
 
 // bool checkCoreDump()
 // {
@@ -586,21 +586,21 @@ void handleRoot()
   sprintf(tempStr, "%04u Tage %02u:%02u:%02u", uptime::getDays(), uptime::getHours(), uptime::getMinutes(), uptime::getSeconds());
   s += "<p>uptime: " + String(tempStr);
   s += "<p>last reset reason: " + verbose_print_reset_reason(esp_reset_reason());
-  s += "<p>";
-  switch (esp_core_dump_image_check())
-  {
-  case ESP_OK:
-    s += "<a href=/coredump>core dump found</a> - <a href=/deletecoredump>delete core dump</a>";
-    break;
-  case ESP_ERR_NOT_FOUND:
-    s += "no core dump found";
-    break;
-  case ESP_ERR_INVALID_SIZE:
-    s += "core dump with invalid size - <a href=/deletecoredump>delete core dump</a>";
-    break;
-  case ESP_ERR_INVALID_CRC:
-    s += "core dump with invalid CRC - <a href=/deletecoredump>delete core dump</a>";
-  }
+  // s += "<p>";
+  // switch (esp_core_dump_image_check())
+  // {
+  // case ESP_OK:
+  //   s += "<a href=/coredump>core dump found</a> - <a href=/deletecoredump>delete core dump</a>";
+  //   break;
+  // case ESP_ERR_NOT_FOUND:
+  //   s += "no core dump found";
+  //   break;
+  // case ESP_ERR_INVALID_SIZE:
+  //   s += "core dump with invalid size - <a href=/deletecoredump>delete core dump</a>";
+  //   break;
+  // case ESP_ERR_INVALID_CRC:
+  //   s += "core dump with invalid CRC - <a href=/deletecoredump>delete core dump</a>";
+  // }
   s += "</fieldset>";
 
   s += "<p>Go to <a href='config'>Configuration</a>";
@@ -962,7 +962,7 @@ String getSysinfoJson()
 
   object["sys"]["reset_reason"] = esp_reset_reason();
   object["sys"]["reset_reason_msg"] = verbose_print_reset_reason(esp_reset_reason());
-  object["sys"]["core_dump"] = esp_core_dump_image_check();
+  // object["sys"]["core_dump"] = esp_core_dump_image_check();
   // object["system"]["heap_free"] = esp_get_free_internal_heap_size();    // in bytes
   object["sys"]["heap_min_free"] = esp_get_minimum_free_heap_size(); // in bytes
   object["ntp"]["time_set"] = timeClient.isTimeSet();
@@ -1612,7 +1612,7 @@ void setup()
   // basic setup
   Serial.begin(115200);
   // initCoreDumpFlash();
-  esp_core_dump_init();
+  // esp_core_dump_init();
   pinMode(LED_BUILTIN, OUTPUT);
   pinMode(PUMPPIN, OUTPUT);
   pinMode(VALVEPIN, OUTPUT);
