@@ -8,6 +8,15 @@
 				"$platformio"
 			],
 			"label": "PlatformIO: Verbose Upload"
+		},
+		{
+			"type": "PlatformIO",
+			"task": "Build (wemos_d1_mini32_USB)",
+			"problemMatcher": [
+				"$platformio"
+			],
+			"group": "build",
+			"label": "PlatformIO: Build (wemos_d1_mini32_USB)"
 		}
 	]
 }
