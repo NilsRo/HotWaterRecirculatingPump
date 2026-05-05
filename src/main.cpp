@@ -1797,17 +1797,20 @@ void applySyslogLogLevel()
 int custom_vprintf(const char *fmt, va_list args) {
   char buf[1024];
   int len = vsnprintf(buf, sizeof(buf), fmt, args);
-  // Print to serial
-  printf("%s", buf);
-  // Send to syslog if configured
-  if (strlen(syslogServer) > 0) {
-    int level = LOG_INFO;
-    if (strstr(buf, "[E]")) level = LOG_ERR;
-    else if (strstr(buf, "[W]")) level = LOG_WARNING;
-    else if (strstr(buf, "[I]")) level = LOG_INFO;
-    else if (strstr(buf, "[D]")) level = LOG_DEBUG;
-    else if (strstr(buf, "[V]")) level = LOG_DEBUG;
-    sendSyslogMessage(level, buf);
+  if (len > 0)
+  {
+    // Print to serial
+    uart_write_bytes(UART_NUM_0, buf, len);
+    // Send to syslog if configured
+    if (strlen(syslogServer) > 0) {
+      int level = LOG_INFO;
+      if (strstr(buf, "[E]")) level = LOG_ERR;
+      else if (strstr(buf, "[W]")) level = LOG_WARNING;
+      else if (strstr(buf, "[I]")) level = LOG_INFO;
+      else if (strstr(buf, "[D]")) level = LOG_DEBUG;
+      else if (strstr(buf, "[V]")) level = LOG_DEBUG;
+      sendSyslogMessage(level, buf);
+    }
   }
   return len;
 }
