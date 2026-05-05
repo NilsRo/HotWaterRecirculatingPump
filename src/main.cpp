@@ -2058,7 +2058,7 @@ void loop()
     ESP.restart();
   }
 
-  if (displayOn && 60000 < now - displayOnAt)
+  if (!manualMode && displayOn && 60000 < now - displayOnAt)
   { // switch display off after 10mins
     display.displayOff();
     displayTimer.detach();
