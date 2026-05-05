@@ -1990,8 +1990,6 @@ void setup()
   ArduinoOTA.onStart([]()
                      {
     ESP_LOGI(TAG, "Start OTA");
-    const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
-    esp_ota_set_boot_partition(next);
     display.displayOn();
     display.clear();
     display.setFont(ArialMT_Plain_10);
@@ -2000,6 +1998,7 @@ void setup()
     display.display(); });
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total)
                         {
+    // esp_task_wdt_reset();
     ESP_LOGI(TAG, "OTA Progress: %u%%", (progress / (total / 100)));
     display.drawProgressBar(4, 32, 120, 8, progress / (total / 100) );
     display.display(); });
