@@ -200,7 +200,7 @@ unsigned int networksPageTotal;
 unsigned long displayPageSubChange;
 unsigned int langu;
 
-#define CONFIG_VERSION "6"
+#define CONFIG_VERSION "7"
 Preferences preferences;
 int iotWebConfPinState = HIGH;
 unsigned long iotWebConfPinChanged;
@@ -1830,7 +1830,7 @@ void setup()
   pinMode(DISPLAYPIN, INPUT_PULLUP);
   pinMode(WIFICONFIGPIN, INPUT_PULLUP);
 
-  // Watchdog für diesen Task aktivieren (5 Sekunden Timeout)
+  // Watchdog für diesen Task aktivieren (10 Sekunden Timeout)
   esp_task_wdt_config_t wdt_config = {
       .timeout_ms = 10000,
       .idle_core_mask = (1 << 1), // Core 1 = loopTask
