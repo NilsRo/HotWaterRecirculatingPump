@@ -24,6 +24,8 @@
 #include <esp_core_dump.h>
 #include <esp_task_wdt.h>
 #include <esp_ota_ops.h>
+#include <esp_log.h>
+#include <OneButton.h>
 #include "average.h"
 
 #define STRING_LEN 128
@@ -32,9 +34,22 @@
 #define nils_length(x) ((sizeof(x) / sizeof(0 [x])) / ((size_t)(!(sizeof(x) % sizeof(0 [x])))))
 // #define nils_length( x ) ( sizeof(x) )
 
+static const char *TAG = "HotWaterPump";
+
+// Syslog levels
+#define LOG_ERR 3
+#define LOG_WARNING 4
+#define LOG_INFO 6
+#define LOG_DEBUG 7
+
 // watchdog
 RTC_DATA_ATTR int crashCounter = 0;
 RTC_DATA_ATTR uint32_t lastCrashTime = 0;
+
+// syslog
+char syslogServer[STRING_LEN];
+char syslogPortStr[6];
+int syslogPort = 514; // default syslog port
 
 // ports
 const int ONEWIREPIN = D8;
@@ -43,16 +58,41 @@ const int VALVEPIN = D4;
 const int DISPLAYPIN = D5;
 const int WIFICONFIGPIN = D7;
 
+// button
+OneButton userBtn(DISPLAYPIN, true);
+OneButton resetBtn(DISPLAYPIN, true);
+
+// OTA
+TaskHandle_t otaTaskHandle = NULL;
+
+bool manualMode = false;
+
+// pump
+static float t[] = {255.0, 255.0, 255.0, 255.0, 255.0}; // letzten 5 Temepraturwerte speichern
+bool pumpRunning = false;
+unsigned long pumpBlock;
+unsigned long pumpStartedAt;
 String pump[20] = {"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""};
 unsigned int pumpCnt;
 bool pumpCntInit = true;
-static float t[] = {255.0, 255.0, 255.0, 255.0, 255.0}; // letzten 5 Temepraturwerte speichern
-bool pumpRunning = false;
-bool pumpManual = false;
-unsigned long pumpBlock;
-unsigned long pumpStartedAt;
-unsigned long timePressed;
-unsigned long timeReleased;
+bool pumpFirstCall = true;
+
+// valve
+float valvePressure;
+bool valveState = false;
+unsigned long valveOpenAt;
+unsigned long valveOpenAtTs;
+unsigned long valveCloseAt;
+unsigned long valveCloseAtTs;
+unsigned long valveSecToRefill;
+int valveMaxOpen;
+char valveMaxOpenStr[4];
+bool valveError = false;
+bool valveInitFill = false;
+SimpleAverage valvePressureAvg(10);
+String valveHist[20] = {"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""};
+unsigned int valveHistCnt;
+bool valveHistCntInit = true;
 
 // temps
 // Queue Handle
@@ -95,32 +135,13 @@ float mqttTempInt;
 float mqttTempDiff;
 unsigned int checkCnt;
 
-// valve
-float valvePressure;
-bool valveState = false;
-unsigned long valveOpenAt;
-unsigned long valveOpenAtTs;
-unsigned long valveCloseAt;
-unsigned long valveCloseAtTs;
-unsigned long valveSecToRefill;
-int valveMaxOpen;
-char valveMaxOpenStr[4];
-bool valveError = false;
-bool valveInitFill = false;
-SimpleAverage valvePressureAvg(10);
-String valveHist[20] = {"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""};
-unsigned int valveHistCnt;
-bool valveHistCntInit = true;
-
 // OLED Display
 SSD1306Wire display(0x3C, SDA, SCL); // ADDRESS, SDA, SCL  -  SDA and SCL usually populate automatically based on your board's pins_arduino.h e.g. https://github.com/esp8266/Arduino/blob/master/variants/nodemcu/pins_arduino.h
 unsigned int displayPage;
 unsigned int displayPageLastRuns = 1;
 bool networksPageFirstCall = true;
-bool pumpFirstCall = true;
-int displayPinState = HIGH;
-unsigned int displayPinChanged;
 bool displayOn = true;
+long displayOnAt;
 bool needReset = false;
 
 #define MQTT_PORT 1883
@@ -164,6 +185,7 @@ Ticker displayTimer;
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP);
+WiFiUDP syslogUDP;
 char ntpServer[STRING_LEN];
 char ntpTimezone[STRING_LEN];
 time_t now;
@@ -189,6 +211,8 @@ static char chooserValues[][DALLASADRESS_LEN] = {"0", "0", "0"};
 static char chooserNames[][STRING_LEN] = {"Sensor 1 NA", "Sensor 2 NA", "Sensor 3 NA"};
 static const char languValues[][STRING_LEN] = {"0", "1"};
 static const char languNames[][STRING_LEN] = {"German", "English"};
+static const char syslogLevelValues[][STRING_LEN] = {"NONE", "ERROR", "WARN", "INFO", "DEBUG", "VERBOSE"};
+static const char syslogLevelNames[][STRING_LEN] = {"None", "Error", "Warn", "Info", "Debug", "Verbose"};
 IotWebConf iotWebConf("Zirkulationspumpe", &dnsServer, &server, "", CONFIG_VERSION);
 IotWebConfParameterGroup mqttGroup = IotWebConfParameterGroup("mqtt", "MQTT");
 IotWebConfTextParameter mqttServerParam = IotWebConfTextParameter("server", "mqttServer", mqttServer, STRING_LEN);
@@ -223,6 +247,11 @@ IotWebConfNumberParameter tempDiffTriggerParam = IotWebConfNumberParameter("temp
 IotWebConfParameterGroup miscGroup = IotWebConfParameterGroup("misc", "misc.");
 iotwebconf::SelectTParameter<STRING_LEN> languParam =
     iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("languParam").label("language").optionValues((const char *)languValues).optionNames((const char *)languNames).optionCount(sizeof(languValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("0").build();
+
+IotWebConfParameterGroup syslogGroup = IotWebConfParameterGroup("syslog", "Syslog");
+IotWebConfTextParameter syslogServerParam = IotWebConfTextParameter("server", "syslogServer", syslogServer, STRING_LEN, "");
+IotWebConfTextParameter syslogPortParam = IotWebConfTextParameter("port", "syslogPort", syslogPortStr, 6, "514");
+iotwebconf::SelectTParameter<STRING_LEN> syslogLogLevelParam = iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("syslogLogLevelParam").label("ESP_LOG level").optionValues((const char *)syslogLevelValues).optionNames((const char *)syslogLevelNames).optionCount(sizeof(syslogLevelValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("INFO").build();
 
 /* #region common */
 int mod(int x, int y)
@@ -465,7 +494,7 @@ void changeNvsMode(bool readOnly)
     nvsStatus = true;
   else
   {
-    Serial.println("Error opening NVS-Namespace");
+    ESP_LOGE(TAG, "Error opening NVS-Namespace");
     for (;;)
       ; // leere Dauerschleife -> Ende
   }
@@ -652,9 +681,9 @@ void handleRoot()
   //   s += "core dump with invalid CRC - <a href=/deletecoredump>delete core dump</a>";
   // }
   const esp_partition_t *running = esp_ota_get_running_partition();
-  s += "<p>Running partition : " + String(running->label);
   const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
-  s += "<p>Next partition : " + String(next->label);
+  s += "<p>Firmware: running  " + String(running->label) + " - OTA updates " + String(next->label) + "</p>";
+
   s += "</fieldset>";
 
   s += "<p>Go to <a href='config'>Configuration</a>";
@@ -690,20 +719,19 @@ void configSaved()
     needReset = true;
 
   // TODO: Funktioniert mit apPasswort noch nicht immer....
-  Serial.println(iotWebConf.getApPasswordParameter()->getLength() > 0);
+  ESP_LOGI(TAG, "AP Password length > 0: %d", iotWebConf.getApPasswordParameter()->getLength() > 0);
   if (iotWebConf.getApPasswordParameter()->getLength() > 0)
     preferences.putString("apPassword", String(iotWebConf.getApPasswordParameter()->valueBuffer));
   preferences.putString("wifiSsid", String(iotWebConf.getWifiAuthInfo().ssid));
   preferences.putString("wifiPassword", String(iotWebConf.getWifiAuthInfo().password));
-
-  Serial.println("Configuration saved.");
+  ESP_LOGI(TAG, "Configuration saved.");
   // TODO: Neustart bei normalen Parametern vermeiden
   needReset = true;
 }
 
 bool formValidator(iotwebconf::WebRequestWrapper *webRequestWrapper)
 {
-  Serial.println("Validating form.");
+  ESP_LOGI(TAG, "Validating form.");
   bool valid = true;
 
   // int l = webRequestWrapper->arg(mqttServerParam.getId()).length();
@@ -718,7 +746,7 @@ bool formValidator(iotwebconf::WebRequestWrapper *webRequestWrapper)
 
 void setTimezone(String timezone)
 {
-  Serial.printf("  Setting Timezone to %s\n", ntpTimezone);
+  ESP_LOGI(TAG, "Setting Timezone to %s", ntpTimezone);
   setenv("TZ", ntpTimezone, 1); //  Now adjust the TZ.  Clock settings are adjusted to show the new local time
   tzset();
 }
@@ -729,62 +757,63 @@ void connectToMqtt()
 {
   if (strlen(mqttServer) > 0)
   {
-    Serial.println("Connecting to MQTT...");
+    ESP_LOGI(TAG, "Connecting to MQTT...");
     mqttClient.connect();
   }
 }
 
 void onWifiConnected()
 {
-  Serial.println("Connected to Wi-Fi.");
-  Serial.println(WiFi.localIP());
+  ESP_LOGI(TAG, "Connected to Wi-Fi. Local IP: %s", WiFi.localIP().toString().c_str());
   connectToMqtt();
   timeClient.begin();
   ArduinoOTA.begin();
+  ESP_LOGI(TAG, "TCP services started.");
+
+  // Setup syslog if configured
+  if (strlen(syslogServer) > 0 && syslogPort > 0) {
+    syslogUDP.begin(0); // Use random local port
+    ESP_LOGI(TAG, "Syslog configured to %s:%d", syslogServer, syslogPort);
+  }
 }
 
 void onWifiDisconnect(WiFiEvent_t event, WiFiEventInfo_t info)
 {
-  Serial.println("Disconnected from Wi-Fi.");
+  ESP_LOGI(TAG, "Disconnected from Wi-Fi.");
   mqttReconnectTimer.detach(); // ensure we don't reconnect to MQTT while reconnecting to Wi-Fi
   timeClient.end();
   // ArduinoOTA.end();  TODO: Fehler untersuchen, dumped.
-  Serial.println("TCP services stopped.");
+  ESP_LOGI(TAG, "TCP services stopped.");
 }
 /* #endregion */
 
 /* #region MQTT */
 void onMqttConnect(bool sessionPresent)
 {
-  Serial.println("Connected to MQTT.");
-  Serial.print("Session present: ");
-  Serial.println(sessionPresent);
+  ESP_LOGI(TAG, "Connected to MQTT.");
+  ESP_LOGI(TAG, "Session present: %s", sessionPresent ? "true" : "false");
   mqttPublish(MQTT_PUB_STATUS, "Online", true, false);
   mqttPublish(MQTT_PUB_WIFI, getWifiJson().c_str(), true, true);
   uint16_t packetIdSub;
   if (strlen(mqttHeaterStatusTopic) > 0)
   {
     packetIdSub = mqttClient.subscribe(mqttHeaterStatusTopic, 2);
-    Serial.print("Subscribed to topic: ");
-    Serial.println(String(mqttHeaterStatusTopic) + " - " + String(packetIdSub));
+    ESP_LOGI(TAG, "Subscribed to topic: %s - %u", mqttHeaterStatusTopic, packetIdSub);
   }
   if (strlen(mqttPumpTopic) > 0)
   {
     packetIdSub = mqttClient.subscribe(mqttPumpTopic, 2);
-    Serial.print("Subscribed to topic: ");
-    Serial.println(String(mqttPumpTopic) + " - " + String(packetIdSub));
+    ESP_LOGI(TAG, "Subscribed to topic: %s - %u", mqttPumpTopic, packetIdSub);
   }
   if (strlen(mqttThermalDesinfectionTopic) > 0)
   {
     packetIdSub = mqttClient.subscribe(mqttThermalDesinfectionTopic, 2);
-    Serial.print("Subscribed to topic: ");
-    Serial.println(String(mqttThermalDesinfectionTopic) + " - " + String(packetIdSub));
+    ESP_LOGI(TAG, "Subscribed to topic: %s - %u", mqttThermalDesinfectionTopic, packetIdSub);
   }
   if (strlen(mqttValvePressureTopic) > 0)
   {
     packetIdSub = mqttClient.subscribe(mqttValvePressureTopic, 2);
-    Serial.print("Subscribed to topic: ");
-    Serial.println(String(mqttValvePressureTopic) + " - " + String(packetIdSub));
+    ESP_LOGI(TAG, "Subscribed to topic: %s - %u", mqttValvePressureTopic, packetIdSub);
   }
   digitalWrite(LED_BUILTIN, HIGH);
   mqttSendTopics(true);
@@ -816,72 +845,46 @@ void onMqttDisconnect(AsyncMqttClientDisconnectReason reason)
   strftime(mqttDisconnectTime, 20, "%d.%m.%Y %T", &localTime);
   mqttDisconnectTimestamp = timeClient.getEpochTime();
 
-  Serial.printf(" [%8u] Disconnected from the broker reason = %s\n", millis(), mqttDisconnectReason.c_str());
+  ESP_LOGI(TAG, " [%8u] Disconnected from the broker reason = %s", millis(), mqttDisconnectReason.c_str());
   digitalWrite(LED_BUILTIN, LOW);
 
   if (WiFi.isConnected())
   {
-    Serial.printf(" [%8u] Reconnecting to MQTT..\n", millis());
+    ESP_LOGI(TAG, " [%8u] Reconnecting to MQTT..", millis());
     mqttReconnectTimer.once(5, connectToMqtt);
   }
 }
 
 void onMqttSubscribe(uint16_t packetId, uint8_t qos)
 {
-  Serial.printf(" [%8u] Subscribe acknowledged id: %u, qos: %u\n", millis(), packetId, qos);
-}
-
-void onMqttPublish(uint16_t packetId)
-{
-  // Serial.print("Publish acknowledged.");
-  // Serial.print("  packetId: ");
-  // Serial.println(packetId);
+  ESP_LOGI(TAG, " [%8u] Subscribe acknowledged id: %u, qos: %u", millis(), packetId, qos);
 }
 
 void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total)
 {
-  // Serial.println("Publish received.");
-  // Serial.print("  topic: ");
-  // Serial.println(topic);
-  // Serial.print("  qos: ");
-  // Serial.println(properties.qos);
-  // Serial.print("  payload: ");
-  // Serial.println(payload);
-  // Serial.print("  dup: ");
-  // Serial.println(properties.dup);
-  // Serial.print("  retain: ");
-  // Serial.println(properties.retain);
-  // Serial.print("  len: ");
-  // Serial.println(len);
-  // Serial.print("  index: ");
-  // Serial.println(index);
-  // Serial.print("  total: ");
-  // Serial.println(total);
   char new_payload[len + 1];
   strncpy(new_payload, payload, len);
   new_payload[len] = '\0';
   if (strcmp(topic, mqttPumpTopic) == 0)
   {
-    Serial.print("mqtt pump: ");
+    ESP_LOGI(TAG, "MQTT pump: %s", new_payload);
     mqttPump = (strcmp(mqttPumpValue, new_payload) == 0);
   }
   else if (strcmp(topic, mqttThermalDesinfectionTopic) == 0)
   {
-    Serial.print("mqtt thermal desinfection: ");
-    Serial.println(new_payload);
+    ESP_LOGI(TAG, "MQTT thermal desinfection: %s", new_payload);
     mqttThermalDesinfection = (strcmp(mqttThermalDesinfectionValue, new_payload) == 0);
   }
   else if (strcmp(topic, mqttHeaterStatusTopic) == 0)
   {
-    Serial.print("mqtt heater status: ");
+    ESP_LOGI(TAG, "MQTT heater status: %s", new_payload);
     mqttHeaterStatus = (strcmp(mqttHeaterStatusValue, new_payload) == 0);
   }
   else if (strcmp(topic, mqttValvePressureTopic) == 0)
   {
-    Serial.print("mqtt pressure: ");
+    ESP_LOGI(TAG, "MQTT pressure: %s", new_payload);
     valvePressure = atof(new_payload);
   }
-  Serial.println(new_payload);
 }
 
 bool getMqttActive()
@@ -913,17 +916,17 @@ void mqttPublish(const char *topic, const char *payload, bool force, bool jsonAd
           object["date"] = timeStr;
           serializeJson(object, newPayloadStr);
         }
-        Serial.println("MQTT send: " + tempTopicStr + " = " + newPayloadStr);
+        ESP_LOGD(TAG, "MQTT send: %s = %s", tempTopicStr.c_str(), newPayloadStr.c_str());
         if (mqttClient.publish(tempTopicStr.c_str(), 0, true, newPayloadStr.c_str()) > 0)
           // TODO: Statt dem String ggf. einen Hash wegspeichern zur Optimierung der Speichernutzung
           mqttLastMessage[topicStr] = payloadStr;
         else
-          Serial.println("MQTT (error) not send: " + tempTopicStr + " = " + newPayloadStr);
+          ESP_LOGE(TAG, "MQTT (error) not send: %s = %s", tempTopicStr.c_str(), newPayloadStr.c_str());
       }
     }
     else
     {
-      Serial.println("MQTT not send: " + tempTopicStr + " = " + payloadStr);
+      ESP_LOGW(TAG, "MQTT not send: %s = %s", tempTopicStr.c_str(), payloadStr.c_str());
     }
   }
 }
@@ -966,7 +969,7 @@ String getStatus()
     status = "emergency";
   else if (mqttThermalDesinfection)
     status = "desinfection";
-  else if (pumpManual)
+  else if (manualMode)
     status = "manual";
   else if (mqttHeaterStatus)
     status = "heater on";
@@ -993,7 +996,7 @@ String getSysinfoJson()
   JsonDocument object;
   String jsonString;
   // TODO: Struktur mit Ordnern versehen und optimieren
-  if (pumpManual)
+  if (manualMode)
     object["dhw"]["mode"] = "manual";
   else
   {
@@ -1033,13 +1036,13 @@ String getSysinfoJson()
 /* #region Sensors */
 void printAddress(DeviceAddress deviceAddress)
 {
+  char addr[24] = {0};
+  char *ptr = addr;
   for (uint8_t i = 0; i < 8; i++)
   {
-    if (deviceAddress[i] < 16)
-      Serial.print("0");
-    Serial.print(deviceAddress[i], HEX);
+    ptr += sprintf(ptr, "%02X", deviceAddress[i]);
   }
-  Serial.println("");
+  ESP_LOGI(TAG, "%s", addr);
 }
 
 // function to format a device address
@@ -1104,23 +1107,27 @@ void detectSensors()
 {
   int i;
   // locate devices on the bus
-  Serial.print("Searching devices...");
-  Serial.print("Found ");
-  xSemaphoreTake(tempSemaphore, portMAX_DELAY); // Warte auf Zugriff auf Sensoren
-  Serial.print(sensors.getDeviceCount(), DEC);
-  Serial.println(" devices.");
+  ESP_LOGI(TAG, "Searching devices...");
+  if (xSemaphoreTake(tempSemaphore, 15000))
+  { // Warte auf Zugriff auf Sensoren
+    ESP_LOGI(TAG, "Found %u devices.", sensors.getDeviceCount());
 
-  // fill connected devices for configuration
-  for (i = 0; i < sensors.getDeviceCount(); i++)
-  {
-    DeviceAddress sensor_id;
-    char str[5];
-    sensors.getAddress(sensor_id, i);
-    printAddress(sensor_id);
-    snprintf(chooserNames[i], sizeof(chooserNames[i]), "%s - %.2f C°", formatAdress(sensor_id).c_str(), sensors.getTempC(sensor_id));
-    snprintf(chooserValues[i], sizeof(chooserValues[i]), "%s", formatAdress(sensor_id).c_str());
+    // fill connected devices for configuration
+    for (i = 0; i < sensors.getDeviceCount(); i++)
+    {
+      DeviceAddress sensor_id;
+      char str[5];
+      sensors.getAddress(sensor_id, i);
+      printAddress(sensor_id);
+      snprintf(chooserNames[i], sizeof(chooserNames[i]), "%s - %.2f C°", formatAdress(sensor_id).c_str(), sensors.getTempC(sensor_id));
+      snprintf(chooserValues[i], sizeof(chooserValues[i]), "%s", formatAdress(sensor_id).c_str());
+    }
+    xSemaphoreGive(tempSemaphore); // Gib Zugriff auf Sensoren frei
   }
-  xSemaphoreGive(tempSemaphore); // Gib Zugriff auf Sensoren frei
+  else
+  {
+    ESP_LOGW(TAG, "Could not take tempSemaphore to detect sensors!");
+  }  
   hexStr2Arr(sensorInt_id, tempIntParam.value(), 8);
   hexStr2Arr(sensorOut_id, tempOutParam.value(), 8);
   hexStr2Arr(sensorRet_id, tempRetParam.value(), 8);
@@ -1166,24 +1173,32 @@ void tempTask(void *parameter)
 
   for (;;)
   {
-    xSemaphoreTake(tempSemaphore, portMAX_DELAY); // Warte auf Zugriff auf Sensoren
-    sensors.requestTemperatures();
-    vTaskDelay(pdMS_TO_TICKS(750)); // Warte 1s nach requestTemperatures
+    ESP_LOGD(TAG, "Requesting temperatures...");
+    if (xSemaphoreTake(tempSemaphore, 1000))
+      {
+        sensors.requestTemperatures();
+      vTaskDelay(pdMS_TO_TICKS(750)); // Warte 1s nach requestTemperatures
 
-    report.tempOut = sensors.getTempC(ids.out);
-    report.tempRet = sensors.getTempC(ids.ret);
-    report.tempInt = sensors.getTempC(ids.intl);
-    xSemaphoreGive(tempSemaphore); // Gib Zugriff auf Sensoren frei
-    report.outConnected = !(report.tempOut == DEVICE_DISCONNECTED_C);
-    report.retConnected = !(report.tempRet == DEVICE_DISCONNECTED_C);
-    report.intConnected = !(report.tempInt == DEVICE_DISCONNECTED_C);
+      report.tempOut = sensors.getTempC(ids.out);
+      report.tempRet = sensors.getTempC(ids.ret);
+      report.tempInt = sensors.getTempC(ids.intl);
+      xSemaphoreGive(tempSemaphore); // Gib Zugriff auf Sensoren frei
+      ESP_LOGD(TAG, "Temperatures read: out=%.2f C°, ret=%.2f C°, int=%.2f C°", report.tempOut, report.tempRet, report.tempInt);
+      report.outConnected = !(report.tempOut == DEVICE_DISCONNECTED_C);
+      report.retConnected = !(report.tempRet == DEVICE_DISCONNECTED_C);
+      report.intConnected = !(report.tempInt == DEVICE_DISCONNECTED_C);
 
-    report.timestamp = xTaskGetTickCount();
+      report.timestamp = xTaskGetTickCount();
 
-    // Sende in Queue, blockiere bis zu 100 ms wenn voll
-    if (tempQueue != NULL)
+      // Sende in Queue, blockiere bis zu 100 ms wenn voll
+      if (tempQueue != NULL)
+      {
+        xQueueOverwrite(tempQueue, &report); // overwrite statt send, damit immer der aktuellste Wert in der Queue ist
+      }
+    }
+    else
     {
-      xQueueOverwrite(tempQueue, &report); // overwrite statt send, damit immer der aktuellste Wert in der Queue ist
+      ESP_LOGW(TAG, "Could not take tempSemaphore in tempTask!");
     }
   }
 }
@@ -1192,7 +1207,6 @@ void tempRead()
 {
   xQueueReceive(tempQueue, &sensorData, 0);
 }
-
 /* #endregion */
 
 /* #region Display */
@@ -1201,7 +1215,7 @@ void getLocalTime()
   struct tm timeinfo;
   if (!getLocalTime(&timeinfo))
   {
-    Serial.println("Failed to obtain time 1");
+    ESP_LOGW(TAG, "Failed to obtain time");
     return;
   }
   localTime = timeinfo;
@@ -1227,6 +1241,10 @@ void updateDisplay()
   unsigned int lineCnt = 1;
 
   display.clear();
+  if (manualMode)
+    display.invertDisplay();
+  else
+    display.normalDisplay();
 
   switch (displayPage)
   {
@@ -1256,7 +1274,6 @@ void updateDisplay()
     }
 
     display.setTextAlignment(TEXT_ALIGN_RIGHT);
-    // display.drawString(128, 0, timeClient.getFormattedTime() );
     strftime(tempStr, 6, "%H:%M", &localTime);
     display.drawString(128, 0, tempStr);
     display.drawLine(0, 11, 128, 11);
@@ -1279,21 +1296,9 @@ void updateDisplay()
 
     display.setTextAlignment(TEXT_ALIGN_CENTER);
     if (pumpRunning)
-    {
-      display.invertDisplay();
-      if (pumpManual)
-        display.drawString(64, 36, String(txtManualOn[langu]));
-      else
         display.drawString(64, 36, String(txtPumpOn[langu]));
-    }
     else
-    {
-      display.normalDisplay();
-      if (pumpManual)
-        display.drawString(64, 36, String(txtManualOff[langu]));
-      else
         display.drawString(64, 36, String(txtPumpOff[langu]));
-    }
     if (valveState)
       display.drawString(64, 48, String(txtValveOn[langu]) + ": " + String(valvePressureAvg) + " Bar");
     else
@@ -1395,7 +1400,7 @@ void updateDisplay()
       }
       if ((60000 < now - lastScan) && WiFi.getMode() == WIFI_STA) // blocked for 60s
       {
-        Serial.println("scan started");
+        ESP_LOGI(TAG, "scan started");
         WiFi.scanDelete();
         WiFi.scanNetworks(true);
         networksPage = 1;
@@ -1403,8 +1408,7 @@ void updateDisplay()
       }
       networksFound = WiFi.scanComplete();
 
-      Serial.print("Scan status: ");
-      Serial.println(networksFound);
+      ESP_LOGI(TAG, "Scan status: %d", networksFound);
       if (networksFound == -1)
       {
         display.setFont(ArialMT_Plain_24);
@@ -1418,15 +1422,13 @@ void updateDisplay()
       }
       else if (networksFound == 0)
       {
-        Serial.print("Networks found: ");
-        Serial.println(networksFound);
+        ESP_LOGI(TAG, "Networks found: %d", networksFound);
         display.setFont(ArialMT_Plain_16);
         display.drawString(64, 24, txtNoAp[langu]);
       }
       else
       {
-        Serial.print("Networks found: ");
-        Serial.println(networksFound);
+        ESP_LOGI(TAG, "Networks found: %d", networksFound);
         if (networksPageFirstCall)
         {
           networksPageFirstCall = false;
@@ -1442,13 +1444,7 @@ void updateDisplay()
         for (int i = lineStart; i < lineEnd; i++)
         {
           // Print SSID and RSSI for each network found
-          Serial.print(i + 1);
-          Serial.print(": ");
-          Serial.print(WiFi.SSID(i));
-          Serial.print(" (");
-          Serial.print(WiFi.RSSI(i));
-          Serial.print(")");
-          Serial.println((WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? " " : "*");
+          ESP_LOGI(TAG, "%d: %s (%d)%s", i + 1, WiFi.SSID(i).c_str(), WiFi.RSSI(i), (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? " " : "*");
           display.setFont(ArialMT_Plain_10);
           display.setTextAlignment(TEXT_ALIGN_LEFT);
           display.drawString(0, 1 + (10 * lineCnt), String(i + 1) + ": " + String(WiFi.SSID(i)) + " (" + String(WiFi.RSSI(i)) + ")");
@@ -1473,14 +1469,13 @@ void updateDisplay()
 void pumpOn()
 {
   char tempStr[128];
-  Serial.println("Turn on circulation");
+  ESP_LOGI(TAG, "Turn on circulation");
   pumpRunning = true;
   pumpStartedAt = millis();
   digitalWrite(PUMPPIN, LOW);
   mqttSendTopics();
-  Serial.print("Pump on: ");
   strftime(tempStr, 40, "%d.%m.%Y %T", &localTime);
-  Serial.println(tempStr);
+  ESP_LOGI(TAG, "Pump on: %s", tempStr);
   if (pumpCntInit)
     pumpCntInit = false;
   else if (++pumpCnt > nils_length(pump) - 1)
@@ -1490,7 +1485,7 @@ void pumpOn()
 
 void pumpOff()
 {
-  Serial.println("Turn off circulation");
+  ESP_LOGI(TAG, "Turn off circulation");
   pumpRunning = false;
   pump[pumpCnt] += " (" + String((int)round((millis() - pumpStartedAt) / 1000 / 60)) + " min.)";
   digitalWrite(PUMPPIN, HIGH);
@@ -1520,7 +1515,7 @@ void checkPump()
       if (!pumpRunning)
         pumpOn();
     }
-    else if (!pumpManual)
+    else if (!manualMode)
     {
       if (++checkCnt >= 5)
         checkCnt = 0; // Reset counter
@@ -1531,12 +1526,11 @@ void checkPump()
       {
         if ((((tempDiff >= tempDiffTrigger && (mqttHeaterStatus || !mqttClient.connected())) || mqttPump) && (300000 < millis() - pumpBlock || pumpFirstCall)) || 86400000 < millis() - pumpStartedAt)
         { // smallest temp change is 0,0625°C,
-          Serial.print("Temperature Delta: ");
-          Serial.println(tempDiff);
+          ESP_LOGI(TAG, "Temperature Delta: %.2f", tempDiff);
           if (mqttPump)
           {
             mqttPump = false;
-            Serial.println("MQTT pump action done");
+            ESP_LOGI(TAG, "MQTT pump action done");
           }
           pumpBlock = millis();
           pumpFirstCall = false;
@@ -1555,8 +1549,7 @@ void valveOpen()
 {
   char tempStr[128];
 
-  Serial.print("Open valve - ");
-  Serial.println(valveState);
+  ESP_LOGI(TAG, "Open valve - %u", valveState);
   if (!valveState)
   {
     valveState = true;
@@ -1570,7 +1563,7 @@ void valveOpen()
     digitalWrite(VALVEPIN, LOW);
 
     strftime(tempStr, 40, "%d.%m.%Y %T", &localTime);
-    Serial.println(tempStr);
+    ESP_LOGI(TAG, "%s", tempStr);
     if (valveHistCntInit)
       valveHistCntInit = false;
     else if (++valveHistCnt > nils_length(valveHist) - 1)
@@ -1581,8 +1574,7 @@ void valveOpen()
 
 void valveClose()
 {
-  Serial.print("Close valve - ");
-  Serial.println(valveState);
+  ESP_LOGI(TAG, "Close valve - %u", valveState);
   if (valveState)
   {
     valveState = false;
@@ -1598,33 +1590,36 @@ void valveClose()
 
 void checkValve()
 {
-  if (!valveError && valveMaxOpen && mqttClient.connected() && valvePressureAvg > 0.0f)
+  if (!manualMode)
   {
-    if (valveState && (((millis() - valveOpenAt) / 60000.0 > valveMaxOpen) || (valvePressureAvg <= valvePressureLowParam.value() - 0.2f) && valveInitFill))
-    // error if valve is opened too long or if the pressure is 0.2 below low pressure setting for longer than quarter of the valveMaxOpen time.
+    if (!valveError && valveMaxOpen && mqttClient.connected() && valvePressureAvg > 0.0f)
     {
-      valveError = true;
+      if (valveState && (((millis() - valveOpenAt) / 60000.0 > valveMaxOpen) || (valvePressureAvg <= valvePressureLowParam.value() - 0.2f) && valveInitFill))
+      // error if valve is opened too long or if the pressure is 0.2 below low pressure setting for longer than quarter of the valveMaxOpen time.
+      {
+        valveError = true;
+        valveClose();
+        return;
+      }
+      if (!valveState && roundTo(valvePressureAvg, 2) <= roundTo(valvePressureLowParam.value(), 2))
+      {
+        valveOpen();
+        return;
+      }
+      if (valveState && roundTo(valvePressureAvg, 2) >= roundTo(valvePressureHighParam.value(), 2))
+      {
+        valveClose();
+        valveInitFill = false;
+        return;
+      }
+    }
+    else if (valveState)
       valveClose();
-      return;
-    }
-    if (!valveState && roundTo(valvePressureAvg, 2) <= roundTo(valvePressureLowParam.value(), 2))
-    {
-      valveOpen();
-      return;
-    }
-    if (valveState && roundTo(valvePressureAvg, 2) >= roundTo(valvePressureHighParam.value(), 2))
-    {
-      valveClose();
-      valveInitFill = false;
-      return;
-    }
   }
-  else if (valveState)
-    valveClose();
 }
 /* #endregion */
 
-/* #region Timer */
+/* #region timer */
 bool onSec1Timer(void *)
 {
   updateTime();
@@ -1648,8 +1643,7 @@ bool onMin1Timer(void *)
 {
   mqttPublishUptime();
   mqttPublish(MQTT_PUB_WIFI, getWifiJson().c_str(), false, true);
-  Serial.print("Add pressure to calc: ");
-  Serial.println(valvePressure);
+  ESP_LOGI(TAG, "Add pressure to calc: %.2f", valvePressure);
   valvePressureAvg.addValue(valvePressure);
   mqttPublish(MQTT_PUB_VALVE_PRESSURE_AVG, String(valvePressureAvg.getAverage()).c_str(), false, false);
 
@@ -1680,10 +1674,150 @@ void handleResetValveError()
 }
 /* #endregion */
 
+/* #region button */
+void handleUserBtnClick(void *oneButton)
+{
+  ESP_LOGD(TAG, "Button pressed ms: %u", ((OneButton *)oneButton)->getPressedMs());
+  if (manualMode)
+  {
+    if (pumpRunning)
+      pumpOff();
+    else
+      pumpOn();
+  }
+  else
+  {
+    if (!displayOn)
+    { // display was off, do not switch page
+      display.displayOn();
+      displayTimer.attach_ms(500, updateDisplay);
+      displayOn = true;
+    }
+    else
+    {
+      displayPageSubChange = now; // init the subpage timer
+      if (displayPage == 4)
+        displayPage = 0;
+      else
+        displayPage++;
+
+      if (displayPage == 4)
+      {
+        if (iotWebConf.getState() != 4)
+          iotWebConf.goOffLine();
+      }
+      else
+      {
+        if (iotWebConf.getState() == 5)
+          iotWebConf.goOnLine();
+      }
+    }
+  }
+}
+
+void handleUserBtnLongPress(void *oneButton)
+{
+  ESP_LOGD(TAG, "Long press detected: %u", ((OneButton *)oneButton)->getPressedMs());
+  manualMode = !manualMode;
+}
+
+void handleUserBtnDoublePress(void *oneButton)
+{
+  ESP_LOGD(TAG, "Double press detected: %u", ((OneButton *)oneButton)->getPressedMs());
+  static byte doublePressCnt = 0;
+  doublePressCnt++;
+  if (doublePressCnt == 1)
+    pumpOn();
+  else if (doublePressCnt == 2)
+    pumpOff();
+    else if (doublePressCnt == 3)
+    valveOpen();
+  else if (doublePressCnt == 4)
+    valveClose();
+  else
+    doublePressCnt = 0;
+}
+
+void handleResetBtnLongPress(void *oneButton)
+{
+  ESP_LOGD(TAG, "Reset button long press detected: %u", ((OneButton *)oneButton)->getPressedMs());
+  iotWebConf.getRootParameterGroup()->applyDefaultValue();
+  iotWebConf.saveConfig();
+  needReset = true;
+  ESP_LOGI(TAG, "Factory reset performed, restarting...");
+}
+/* #endregion */
+
+/* #region logging */
+void sendSyslogMessage(int level, const char *message) {
+  if (strlen(syslogServer) == 0 || syslogPort == 0) return;
+  
+  // Syslog priority: facility * 8 + level
+  // Facility 1 = user-level messages
+  int priority = 1 * 8 + level;
+  
+  // Simple syslog format: <priority>timestamp hostname tag: message
+  char syslogMsg[1024];
+  struct tm timeinfo;
+  if (getLocalTime(&timeinfo)) {
+    strftime(syslogMsg, sizeof(syslogMsg), "%Y-%m-%dT%H:%M:%S", &timeinfo);
+  } else {
+    strcpy(syslogMsg, "unknown-time");
+  }
+  
+  char fullMsg[1100];
+  snprintf(fullMsg, sizeof(fullMsg), "<%d>%s %s %s: %s", priority, syslogMsg, hostname, TAG, message);
+  
+  syslogUDP.beginPacket(syslogServer, syslogPort);
+  syslogUDP.write((uint8_t*)fullMsg, strlen(fullMsg));
+  syslogUDP.endPacket();
+}
+
+void applySyslogLogLevel()
+{
+  const char *level = syslogLogLevelParam.value();
+  if (strcmp(level, "NONE") == 0)
+    esp_log_level_set(TAG, ESP_LOG_NONE);
+  else if (strcmp(level, "ERROR") == 0)
+    esp_log_level_set(TAG, ESP_LOG_ERROR);
+  else if (strcmp(level, "WARN") == 0)
+    esp_log_level_set(TAG, ESP_LOG_WARN);
+  else if (strcmp(level, "INFO") == 0)
+    esp_log_level_set(TAG, ESP_LOG_INFO);
+  else if (strcmp(level, "DEBUG") == 0)
+    esp_log_level_set(TAG, ESP_LOG_DEBUG);
+  else if (strcmp(level, "VERBOSE") == 0)
+    esp_log_level_set(TAG, ESP_LOG_VERBOSE);
+  else
+    esp_log_level_set(TAG, ESP_LOG_INFO);
+
+  ESP_LOGI(TAG, "ESP_LOG level set to %s", level);
+}
+
+int custom_vprintf(const char *fmt, va_list args) {
+  char buf[1024];
+  int len = vsnprintf(buf, sizeof(buf), fmt, args);
+  // Print to serial
+  printf("%s", buf);
+  // Send to syslog if configured
+  if (strlen(syslogServer) > 0) {
+    int level = LOG_INFO;
+    if (strstr(buf, "[E]")) level = LOG_ERR;
+    else if (strstr(buf, "[W]")) level = LOG_WARNING;
+    else if (strstr(buf, "[I]")) level = LOG_INFO;
+    else if (strstr(buf, "[D]")) level = LOG_DEBUG;
+    else if (strstr(buf, "[V]")) level = LOG_DEBUG;
+    sendSyslogMessage(level, buf);
+  }
+  return len;
+}
+/* #endregion */
+
 void setup()
 {
   // basic setup
   Serial.begin(115200);
+  esp_log_set_vprintf(custom_vprintf);
   // initCoreDumpFlash();
   // esp_core_dump_init();
   pinMode(LED_BUILTIN, OUTPUT);
@@ -1698,17 +1832,19 @@ void setup()
 
   // Watchdog für diesen Task aktivieren (5 Sekunden Timeout)
   esp_task_wdt_config_t wdt_config = {
-      .timeout_ms = 5000,
+      .timeout_ms = 10000,
       .idle_core_mask = (1 << 1), // Core 1 = loopTask
       .trigger_panic = true};
-  esp_task_wdt_init(&wdt_config);
-  esp_task_wdt_add(NULL); // current task (loopTask)
+  // esp_task_wdt_init(&wdt_config);
+  // esp_task_wdt_add(NULL); // current task (loopTask)
   handleCrashCounter();
   checkForFailover();
-  Serial.println("Watchdog initialized and crash counter checked.");
+  ESP_LOGI(TAG, "Watchdog initialized and crash counter checked.");
 
   display.init();
   display.setFont(ArialMT_Plain_10);
+  displayOnAt = millis();
+  ESP_LOGI(TAG, "Display ready");
 
   // WiFi.onEvent(onWifiConnected, ARDUINO_EVENT_WIFI_STA_CONNECTED);
   WiFi.onEvent(onWifiDisconnect, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
@@ -1717,20 +1853,19 @@ void setup()
   // Start NVS configuration
   nvs_stats_t nvs_stats;
   nvs_get_stats(NULL, &nvs_stats);
-  Serial.println("NVS-Statistics:");
-  Serial.print("Used entries: ");
-  Serial.println(nvs_stats.used_entries);
-  Serial.print("Free entries: ");
-  Serial.println(nvs_stats.free_entries);
-  Serial.print("Total entries: ");
-  Serial.println(nvs_stats.total_entries);
+  ESP_LOGI(TAG, "NVS-Statistics:");
+  ESP_LOGI(TAG, "Used entries: %u", nvs_stats.used_entries);
+  ESP_LOGI(TAG, "Free entries: %u", nvs_stats.free_entries);
+  ESP_LOGI(TAG, "Total entries: %u", nvs_stats.total_entries);
 
   changeNvsMode(false);
   valveOpenAt = preferences.getULong("valveOpenAt", 0);
   valveOpenAt = preferences.getULong("valveOpenAtTs", 0);
   valveCloseAt = preferences.getULong("valveCloseAt", 0);
   valveCloseAt = preferences.getULong("valveCloseAtTs", 0);
-  Serial.println("NVS loaded");
+  ESP_LOGI(TAG, "NVS loaded");
+
+  applySyslogLogLevel();
 
   iotWebConf.setupUpdateServer(
       [](const char *updatePath)
@@ -1765,6 +1900,10 @@ void setup()
   iotWebConf.addParameterGroup(&tempGroup);
   miscGroup.addItem(&languParam);
   iotWebConf.addParameterGroup(&miscGroup);
+  syslogGroup.addItem(&syslogServerParam);
+  syslogGroup.addItem(&syslogPortParam);
+  syslogGroup.addItem(&syslogLogLevelParam);
+  iotWebConf.addParameterGroup(&syslogGroup);
 
   iotWebConf.setConfigSavedCallback(&configSaved);
   iotWebConf.setFormValidator(&formValidator);
@@ -1774,35 +1913,33 @@ void setup()
   bool validConfig = iotWebConf.init();
   if (!validConfig)
   {
-    Serial.println("Invalid config detected - restoring WiFi settings...");
+    ESP_LOGW(TAG, "Invalid config detected - restoring WiFi settings...");
     // much better handling than iotWebConf library to avoid lost wifi on configuration change
     if (preferences.isKey("apPassword"))
       strncpy(iotWebConf.getApPasswordParameter()->valueBuffer, preferences.getString("apPassword").c_str(), iotWebConf.getApPasswordParameter()->getLength());
     else
-      Serial.println("AP Password not found for restauration.");
+      ESP_LOGW(TAG, "AP Password not found for restauration.");
     if (preferences.isKey("wifiSsid"))
       strncpy(iotWebConf.getWifiSsidParameter()->valueBuffer, preferences.getString("wifiSsid").c_str(), iotWebConf.getWifiSsidParameter()->getLength());
     else
-      Serial.println("WiFi SSID not found for restauration.");
+      ESP_LOGW(TAG, "WiFi SSID not found for restauration.");
     if (preferences.isKey("wifiPassword"))
       strncpy(iotWebConf.getWifiPasswordParameter()->valueBuffer, preferences.getString("wifiPassword").c_str(), iotWebConf.getWifiPasswordParameter()->getLength());
     else
-      Serial.println("WiFi Password not found for restauration.");
+      ESP_LOGW(TAG, "WiFi Password not found for restauration.");
     iotWebConf.saveConfig();
     iotWebConf.resetWifiAuthInfo();
   }
 
   langu = atoi(languParam.value());
   tempDiffTrigger = atof(tempDiffTriggerParam.valueBuffer);
-  Serial.print("tempDiffTrigger set to: ");
-  Serial.println(tempDiffTrigger);
+  ESP_LOGI(TAG, "tempDiffTrigger set to: %.2f", tempDiffTrigger);
   valveMaxOpen = atoi(valveMaxOpenParam.valueBuffer);
-  Serial.print("valveMaxOpen set to: ");
-  Serial.println(valveMaxOpen);
+  ESP_LOGI(TAG, "valveMaxOpen set to: %d", valveMaxOpen);
 
   // -- Set up required URL handlers on the web server.
   server.on("/", handleRoot);
-  server.on("/config", [] {
+  server.on("/config", []() {
     detectSensors();
     iotWebConf.handleConfig();
   });
@@ -1811,23 +1948,22 @@ void setup()
   server.on("/coredump", handleCoreDump);
   server.on("/deletecoredump", handleDeleteCoreDump);
   server.on("/crash", startCrash); // Adress to create a coredump for testing
-  server.on("/resetValveError", handleResetValveError); // Adress to create a coredump for testing
+  server.on("/resetValveError", handleResetValveError);
   // TODO: detectSensors per Link aufrufen
-  Serial.println("Wifi manager ready.");
+  ESP_LOGI(TAG, "Wifi manager ready.");
 
   strcpy(mqttWillTopic, mqttTopicPath);
   strcat(mqttWillTopic, MQTT_PUB_STATUS);
   mqttClient.setWill(mqttWillTopic, 0, true, "Offline", 7);
   mqttClient.onConnect(onMqttConnect);
   mqttClient.onDisconnect(onMqttDisconnect);
-  mqttClient.onPublish(onMqttPublish);
   mqttClient.onMessage(onMqttMessage);
   mqttClient.onSubscribe(onMqttSubscribe);
 
   if (mqttUser != "")
     mqttClient.setCredentials(mqttUser, mqttPassword);
   mqttClient.setServer(mqttServer, MQTT_PORT);
-  Serial.println("MQTT ready");
+  ESP_LOGI(TAG, "MQTT ready");
 
   // start OneWire sensor reading
   tempSemaphore = xSemaphoreCreateBinary();
@@ -1843,17 +1979,17 @@ void setup()
   memcpy(pIds->intl, sensorInt_id, sizeof(DeviceAddress_t));
   // Erstelle Tasks
   xTaskCreatePinnedToCore(tempTask, "TempTask", 4096, pIds, 1, &tempTaskHandle, 1);
-  Serial.println("Sensors ready");
+  ESP_LOGI(TAG, "Sensors ready");
 
   // configure the timezone
   configTime(0, 0, ntpServer);
   setTimezone(ntpTimezone);
-  Serial.println("NTP ready");
+  ESP_LOGI(TAG, "NTP ready");
 
   // Init OTA function
   ArduinoOTA.onStart([]()
                      {
-    Serial.println("Start OTA");
+    ESP_LOGI(TAG, "Start OTA");
     const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
     esp_ota_set_boot_partition(next);
     display.displayOn();
@@ -1864,12 +2000,12 @@ void setup()
     display.display(); });
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total)
                         {
-    Serial.printf("OTA Progress: %u%%\r", (progress / (total / 100)));
+    ESP_LOGI(TAG, "OTA Progress: %u%%", (progress / (total / 100)));
     display.drawProgressBar(4, 32, 120, 8, progress / (total / 100) );
     display.display(); });
   ArduinoOTA.onEnd([]()
                    {
-    Serial.println("\nEnd OTA");
+    ESP_LOGI(TAG, "\nEnd OTA");
     display.clear();
     display.setFont(ArialMT_Plain_10);
     display.setTextAlignment(TEXT_ALIGN_CENTER_BOTH);
@@ -1877,23 +2013,31 @@ void setup()
     display.display(); });
   ArduinoOTA.onError([](ota_error_t error)
                      {
-    Serial.printf("Error[%u]: ", error);
-    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
-    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
-    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
-    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
-    else if (error == OTA_END_ERROR) Serial.println("End Failed");
+    ESP_LOGE(TAG, "Error[%u]: ", error);
+    if (error == OTA_AUTH_ERROR) ESP_LOGE(TAG, "Auth Failed");
+    else if (error == OTA_BEGIN_ERROR) ESP_LOGE(TAG, "Begin Failed");
+    else if (error == OTA_CONNECT_ERROR) ESP_LOGE(TAG, "Connect Failed");
+    else if (error == OTA_RECEIVE_ERROR) ESP_LOGE(TAG, "Receive Failed");
+    else if (error == OTA_END_ERROR) ESP_LOGE(TAG, "End Failed");
     display.clear();
     display.setFont(ArialMT_Plain_24);
     display.drawString(display.getWidth() / 2, display.getHeight() / 2, "OTA Failed"); });
-  Serial.println("OTA Ready");
+  ESP_LOGI(TAG, "OTA ready");
 
   // Timers
   timer.every(1000, onSec1Timer);
   timer.every(10000, onSec10Timer);
   timer.every(60000, onMin1Timer);
-  Serial.println("Timer ready");
+  ESP_LOGI(TAG, "Timer ready");
   
+  // Button
+  userBtn.attachClick(handleUserBtnClick, &userBtn);
+  userBtn.attachLongPressStop(handleUserBtnLongPress, &userBtn);
+  userBtn.attachDoubleClick(handleUserBtnDoublePress, &userBtn);
+  userBtn.setLongPressIntervalMs(1000);
+  resetBtn.attachLongPressStop(handleResetBtnLongPress, &resetBtn);
+  resetBtn.setLongPressIntervalMs(1000);
+  ESP_LOGI(TAG, "Buttons ready");
 
   // Firmware als gültig markieren
   esp_ota_mark_app_valid_cancel_rollback();
@@ -1901,95 +2045,21 @@ void setup()
 
 void loop()
 {
-  esp_task_wdt_reset();
-  iotWebConf.doLoop();
+  // esp_task_wdt_reset();
   ArduinoOTA.handle();
+  iotWebConf.doLoop();
   timer.tick();
+  userBtn.tick();
+  resetBtn.tick();
 
   if (needReset)
   {
-    Serial.println("Rebooting in 1 second.");
+    ESP_LOGI(TAG, "Rebooting in 1 second.");
     iotWebConf.delay(1000);
     ESP.restart();
   }
 
-  // Check buttons
-  unsigned long now = millis();
-  if ((500 < now - iotWebConfPinChanged) && (iotWebConfPinState != digitalRead(WIFICONFIGPIN)))
-  {
-    iotWebConfPinState = 1 - iotWebConfPinState; // invert pin state as it is changed
-    iotWebConfPinChanged = now;
-    if (iotWebConfPinState)
-    { // reset settings and reboot
-      iotWebConf.getRootParameterGroup()->applyDefaultValue();
-      iotWebConf.saveConfig();
-      needReset = true;
-    }
-  }
-  if ((500 < now - displayPinChanged) && (displayPinState != digitalRead(DISPLAYPIN)))
-  {
-    displayPinState = 1 - displayPinState; // invert pin state as it is changed
-    displayPinChanged = now;
-    if (displayPinState) // button pressed action - set pressed time
-    {
-      // button released
-      timeReleased = millis();
-      Serial.println("Button released");
-      Serial.print("Display Button State: ");
-      Serial.print(displayPinState);
-      Serial.print(", Time: ");
-      Serial.println(timeReleased - timePressed);
-      if (2000 < (timeReleased - timePressed))
-      {
-        Serial.println("Long press detected");
-        pumpManual = !pumpManual;
-      }
-      else
-      {
-        if (pumpManual)
-        {
-          if (pumpRunning)
-            pumpOff();
-          else
-            pumpOn();
-        }
-        else
-        {
-          if (!displayOn)
-          { // display was off, do not switch page
-            display.displayOn();
-            displayTimer.attach_ms(500, updateDisplay);
-            displayOn = true;
-          }
-          else
-          {
-            displayPageSubChange = now; // init the subpage timer
-            if (displayPage == 4)
-              displayPage = 0;
-            else
-              displayPage++;
-
-            if (displayPage == 4)
-            {
-              if (iotWebConf.getState() != 4)
-                iotWebConf.goOffLine();
-            }
-            else
-            {
-              if (iotWebConf.getState() == 5)
-                iotWebConf.goOnLine();
-            }
-          }
-        }
-      }
-    }
-    else
-    {
-      timePressed = now;
-      Serial.println("Button pressed");
-    }
-  }
-  if (600000 < now - timePressed)
+  if (displayOn && 60000 < now - displayOnAt)
   { // switch display off after 10mins
     display.displayOff();
     displayTimer.detach();
