@@ -20,12 +20,16 @@
 #include <time.h>
 #include <uptime.h>
 #include <algorithm>
+#include <OneButton.h>
 #include <langu.h>
 #include <esp_core_dump.h>
 #include <esp_task_wdt.h>
 #include <esp_ota_ops.h>
 #include <esp_log.h>
-#include <OneButton.h>
+extern "C"
+{
+#include "driver/uart.h"
+}
 #include "average.h"
 
 #define STRING_LEN 128
@@ -140,7 +144,7 @@ SSD1306Wire display(0x3C, SDA, SCL); // ADDRESS, SDA, SCL  -  SDA and SCL usuall
 unsigned int displayPage;
 unsigned int displayPageLastRuns = 1;
 bool networksPageFirstCall = true;
-bool displayOn = true;
+bool displayState = true;
 long displayOnAt;
 bool needReset = false;
 
@@ -1463,6 +1467,14 @@ void updateDisplay()
   }
   display.display();
 }
+
+void displayOn()
+{
+  display.displayOn();
+  displayState = true;
+  displayOnAt = millis();
+  displayTimer.attach_ms(500, updateDisplay);
+}
 /* #endregion */
 
 /* #region control logic */
@@ -1687,12 +1699,8 @@ void handleUserBtnClick(void *oneButton)
   }
   else
   {
-    if (!displayOn)
-    { // display was off, do not switch page
-      display.displayOn();
-      displayTimer.attach_ms(500, updateDisplay);
-      displayOn = true;
-    }
+    if (!displayState)
+      displayOn();
     else
     {
       displayPageSubChange = now; // init the subpage timer
@@ -1846,7 +1854,7 @@ void setup()
 
   display.init();
   display.setFont(ArialMT_Plain_10);
-  displayOnAt = millis();
+  displayOn();
   ESP_LOGI(TAG, "Display ready");
 
   // WiFi.onEvent(onWifiConnected, ARDUINO_EVENT_WIFI_STA_CONNECTED);
@@ -1993,11 +2001,11 @@ void setup()
   ArduinoOTA.onStart([]()
                      {
     ESP_LOGI(TAG, "Start OTA");
-    display.displayOn();
+    displayOn();
     display.clear();
     display.setFont(ArialMT_Plain_10);
     display.setTextAlignment(TEXT_ALIGN_CENTER_BOTH);
-    display.drawString(display.getWidth() / 2, display.getHeight() / 2 - 10, "OTA Update -> " + String(next->label));
+    display.drawString(display.getWidth() / 2, display.getHeight() / 2 - 10, "OTA Update");
     display.display(); });
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total)
                         {
@@ -2061,10 +2069,10 @@ void loop()
     ESP.restart();
   }
 
-  if (!manualMode && displayOn && 60000 < now - displayOnAt)
+  if (!manualMode && displayState && 60000 < now - displayOnAt)
   { // switch display off after 10mins
     display.displayOff();
     displayTimer.detach();
-    displayOn = false;
+    displayState = false;
   }
 }
