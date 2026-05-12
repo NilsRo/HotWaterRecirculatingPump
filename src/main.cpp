@@ -25,11 +25,7 @@
 #include <esp_core_dump.h>
 #include <esp_task_wdt.h>
 #include <esp_ota_ops.h>
-#include <esp_log.h>
-extern "C"
-{
-#include "driver/uart.h"
-}
+#include <Elog.h>
 #include "average.h"
 
 #define STRING_LEN 128
@@ -40,7 +36,8 @@ extern "C"
 
 static const char *TAG = "HotWaterPump";
 
-// Syslog levels
+// elog
+#define LOGID 0
 #define LOG_ERR 3
 #define LOG_WARNING 4
 #define LOG_INFO 6
@@ -187,13 +184,15 @@ Ticker mqttReconnectTimer;
 auto timer = timer_create_default();
 Ticker displayTimer;
 
+
+
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP);
-WiFiUDP syslogUDP;
 char ntpServer[STRING_LEN];
 char ntpTimezone[STRING_LEN];
-time_t now;
 struct tm localTime;
+
+unsigned long nowMillis = 0;
 
 IPAddress localIP;
 char hostname[STRING_LEN];
@@ -215,8 +214,8 @@ static char chooserValues[][DALLASADRESS_LEN] = {"0", "0", "0"};
 static char chooserNames[][STRING_LEN] = {"Sensor 1 NA", "Sensor 2 NA", "Sensor 3 NA"};
 static const char languValues[][STRING_LEN] = {"0", "1"};
 static const char languNames[][STRING_LEN] = {"German", "English"};
-static const char syslogLevelValues[][STRING_LEN] = {"NONE", "ERROR", "WARN", "INFO", "DEBUG", "VERBOSE"};
-static const char syslogLevelNames[][STRING_LEN] = {"None", "Error", "Warn", "Info", "Debug", "Verbose"};
+static const char syslogLevelValues[][STRING_LEN] = {"ERROR", "WARNING", "INFO", "DEBUG"};
+static const char syslogLevelNames[][STRING_LEN] = {"Error", "Warning", "Info", "Debug"};
 IotWebConf iotWebConf("Zirkulationspumpe", &dnsServer, &server, "", CONFIG_VERSION);
 IotWebConfParameterGroup mqttGroup = IotWebConfParameterGroup("mqtt", "MQTT");
 IotWebConfTextParameter mqttServerParam = IotWebConfTextParameter("server", "mqttServer", mqttServer, STRING_LEN);
@@ -255,7 +254,7 @@ iotwebconf::SelectTParameter<STRING_LEN> languParam =
 IotWebConfParameterGroup syslogGroup = IotWebConfParameterGroup("syslog", "Syslog");
 IotWebConfTextParameter syslogServerParam = IotWebConfTextParameter("server", "syslogServer", syslogServer, STRING_LEN, "");
 IotWebConfTextParameter syslogPortParam = IotWebConfTextParameter("port", "syslogPort", syslogPortStr, 6, "514");
-iotwebconf::SelectTParameter<STRING_LEN> syslogLogLevelParam = iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("syslogLogLevelParam").label("ESP_LOG level").optionValues((const char *)syslogLevelValues).optionNames((const char *)syslogLevelNames).optionCount(sizeof(syslogLevelValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("INFO").build();
+iotwebconf::SelectTParameter<STRING_LEN> syslogLogLevelParam = iotwebconf::Builder<iotwebconf::SelectTParameter<STRING_LEN>>("syslogLogLevelParam").label("syslog loglevel").optionValues((const char *)syslogLevelValues).optionNames((const char *)syslogLevelNames).optionCount(sizeof(syslogLevelValues) / STRING_LEN).nameLength(STRING_LEN).defaultValue("INFO").build();
 
 /* #region common */
 int mod(int x, int y)
@@ -445,8 +444,6 @@ void handleDeleteCoreDump()
 /* #region watchdog */
 void handleCrashCounter()
 {
-  uint32_t now = millis() / 1000; // Sekunden seit Boot
-
   // Reset-Gründe prüfen
   esp_reset_reason_t reason = esp_reset_reason();
 
@@ -459,19 +456,19 @@ void handleCrashCounter()
   if (isCrash)
   {
     // Wenn letzter Crash zu lange her → Counter verfallen lassen
-    if (now - lastCrashTime > 600)
+    if (nowMillis - lastCrashTime > 600000)
     { // 600 Sekunden = 10 Minuten
       crashCounter = 0;
     }
 
     crashCounter++;
-    lastCrashTime = now;
+    lastCrashTime = nowMillis;
   }
   else
   {
     // Normaler Boot → Counter verfallen lassen
     crashCounter = 0;
-    lastCrashTime = now;
+    lastCrashTime = nowMillis;
   }
 }
 
@@ -498,7 +495,7 @@ void changeNvsMode(bool readOnly)
     nvsStatus = true;
   else
   {
-    ESP_LOGE(TAG, "Error opening NVS-Namespace");
+    Logger.log(LOGID, ELOG_LEVEL_ERROR, "Error opening NVS-Namespace");
     for (;;)
       ; // leere Dauerschleife -> Ende
   }
@@ -509,6 +506,25 @@ void saveValveTimestampNvs(const char *prefKey, unsigned long value)
   changeNvsMode(false);
   preferences.putULong(prefKey, value);
   changeNvsMode(true);
+}
+/* #endregion */
+
+/* #region logging */
+void applySyslogLogLevel(const char *level)
+{
+  if (strcmp(level, "ERROR") == 0)
+    Logger.setSyslogLogLevel(LOGID, ELOG_LEVEL_ERROR, ELOG_FAC_SYSLOG);
+  else if (strcmp(level, "WARNING") == 0)
+    Logger.setSyslogLogLevel(LOGID, ELOG_LEVEL_WARNING, ELOG_FAC_SYSLOG);
+  else if (strcmp(level, "INFO") == 0)
+    Logger.setSyslogLogLevel(LOGID, ELOG_LEVEL_INFO, ELOG_FAC_SYSLOG);
+  else if (strcmp(level, "DEBUG") == 0)
+    Logger.setSyslogLogLevel(LOGID, ELOG_LEVEL_DEBUG, ELOG_FAC_SYSLOG);
+  else
+    Logger.setSyslogLogLevel(LOGID, ELOG_LEVEL_INFO, ELOG_FAC_SYSLOG); // default
+
+  Serial.printf("Elog syslog level set to %s\n", level);
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "Elog syslog level set to %s", level);
 }
 /* #endregion */
 
@@ -654,14 +670,14 @@ void handleRoot()
   s += "<p><h3>" + String(nils_length(valveHist)) + " Last valve actions</h3>";
   for (int i = 0; i < nils_length(valveHist); i++)
   { // display last pumpOn Events in right order
-    byte arrIndex = mod((((int)valveHistCnt) - i), nils_length(valveHist));
+    short arrIndex = mod((((int)valveHistCnt) - i), nils_length(valveHist));
     sprintf(tempStr, "%02d", i + 1);
     s += String(tempStr) + ": " + valveHist[arrIndex] + "<br>";
   }
   s += "<p><h3>" + String(nils_length(pump)) + " Last pump actions</h3>";
   for (int i = 0; i < nils_length(pump); i++)
   { // display last pumpOn Events in right order
-    byte arrIndex = mod((((int)pumpCnt) - i), nils_length(pump));
+    short arrIndex = mod((((int)pumpCnt) - i), nils_length(pump));
     sprintf(tempStr, "%02d", i + 1);
     s += String(tempStr) + ": " + pump[arrIndex] + "<br>";
   }
@@ -686,7 +702,7 @@ void handleRoot()
   // }
   const esp_partition_t *running = esp_ota_get_running_partition();
   const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
-  s += "<p>Firmware: running  " + String(running->label) + " - OTA updates " + String(next->label) + "</p>";
+  s += "<p>Firmware: running  " + String(running->label) + " - OTA updates to " + String(next->label) + "</p>";
 
   s += "</fieldset>";
 
@@ -723,19 +739,20 @@ void configSaved()
     needReset = true;
 
   // TODO: Funktioniert mit apPasswort noch nicht immer....
-  ESP_LOGI(TAG, "AP Password length > 0: %d", iotWebConf.getApPasswordParameter()->getLength() > 0);
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "AP Password length > 0: %d", iotWebConf.getApPasswordParameter()->getLength() > 0);
   if (iotWebConf.getApPasswordParameter()->getLength() > 0)
     preferences.putString("apPassword", String(iotWebConf.getApPasswordParameter()->valueBuffer));
   preferences.putString("wifiSsid", String(iotWebConf.getWifiAuthInfo().ssid));
   preferences.putString("wifiPassword", String(iotWebConf.getWifiAuthInfo().password));
-  ESP_LOGI(TAG, "Configuration saved.");
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "Configuration saved.");
   // TODO: Neustart bei normalen Parametern vermeiden
+  changeNvsMode(true);
   needReset = true;
 }
 
 bool formValidator(iotwebconf::WebRequestWrapper *webRequestWrapper)
 {
-  ESP_LOGI(TAG, "Validating form.");
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "Validating form.");
   bool valid = true;
 
   // int l = webRequestWrapper->arg(mqttServerParam.getId()).length();
@@ -750,7 +767,7 @@ bool formValidator(iotwebconf::WebRequestWrapper *webRequestWrapper)
 
 void setTimezone(String timezone)
 {
-  ESP_LOGI(TAG, "Setting Timezone to %s", ntpTimezone);
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "Setting Timezone to %s", ntpTimezone);
   setenv("TZ", ntpTimezone, 1); //  Now adjust the TZ.  Clock settings are adjusted to show the new local time
   tzset();
 }
@@ -761,63 +778,65 @@ void connectToMqtt()
 {
   if (strlen(mqttServer) > 0)
   {
-    ESP_LOGI(TAG, "Connecting to MQTT...");
+    Logger.log(LOGID, ELOG_LEVEL_INFO, "Connecting to MQTT...");
     mqttClient.connect();
   }
 }
 
 void onWifiConnected()
 {
-  ESP_LOGI(TAG, "Connected to Wi-Fi. Local IP: %s", WiFi.localIP().toString().c_str());
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "Connected to Wi-Fi. Local IP: %s", WiFi.localIP().toString().c_str());
   connectToMqtt();
   timeClient.begin();
   ArduinoOTA.begin();
-  ESP_LOGI(TAG, "TCP services started.");
 
   // Setup syslog if configured
   if (strlen(syslogServer) > 0 && syslogPort > 0) {
-    syslogUDP.begin(0); // Use random local port
-    ESP_LOGI(TAG, "Syslog configured to %s:%d", syslogServer, syslogPort);
+    Logger.configureSyslog(syslogServer, syslogPort, iotWebConf.getThingName(), true); // Syslog server IP, port and device name
+    Logger.registerSyslog(LOGID, ELOG_LEVEL_DEBUG, ELOG_FAC_SYSLOG, TAG);              // Register syslog with the same device name
+    applySyslogLogLevel(syslogLogLevelParam.value());
+    Logger.log(LOGID, ELOG_LEVEL_INFO, "Syslog configured to %s:%d", syslogServer, syslogPort);
   }
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "TCP services started.");
 }
 
 void onWifiDisconnect(WiFiEvent_t event, WiFiEventInfo_t info)
 {
-  ESP_LOGI(TAG, "Disconnected from Wi-Fi.");
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "Disconnected from Wi-Fi.");
   mqttReconnectTimer.detach(); // ensure we don't reconnect to MQTT while reconnecting to Wi-Fi
   timeClient.end();
   // ArduinoOTA.end();  TODO: Fehler untersuchen, dumped.
-  ESP_LOGI(TAG, "TCP services stopped.");
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "TCP services stopped.");
 }
 /* #endregion */
 
 /* #region MQTT */
 void onMqttConnect(bool sessionPresent)
 {
-  ESP_LOGI(TAG, "Connected to MQTT.");
-  ESP_LOGI(TAG, "Session present: %s", sessionPresent ? "true" : "false");
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "Connected to MQTT.");
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "Session present: %s", sessionPresent ? "true" : "false");
   mqttPublish(MQTT_PUB_STATUS, "Online", true, false);
   mqttPublish(MQTT_PUB_WIFI, getWifiJson().c_str(), true, true);
   uint16_t packetIdSub;
   if (strlen(mqttHeaterStatusTopic) > 0)
   {
     packetIdSub = mqttClient.subscribe(mqttHeaterStatusTopic, 2);
-    ESP_LOGI(TAG, "Subscribed to topic: %s - %u", mqttHeaterStatusTopic, packetIdSub);
+    Logger.log(LOGID, ELOG_LEVEL_INFO, "Subscribed to topic: %s - %u", mqttHeaterStatusTopic, packetIdSub);
   }
   if (strlen(mqttPumpTopic) > 0)
   {
     packetIdSub = mqttClient.subscribe(mqttPumpTopic, 2);
-    ESP_LOGI(TAG, "Subscribed to topic: %s - %u", mqttPumpTopic, packetIdSub);
+    Logger.log(LOGID, ELOG_LEVEL_INFO, "Subscribed to topic: %s - %u", mqttPumpTopic, packetIdSub);
   }
   if (strlen(mqttThermalDesinfectionTopic) > 0)
   {
     packetIdSub = mqttClient.subscribe(mqttThermalDesinfectionTopic, 2);
-    ESP_LOGI(TAG, "Subscribed to topic: %s - %u", mqttThermalDesinfectionTopic, packetIdSub);
+    Logger.log(LOGID, ELOG_LEVEL_INFO, "Subscribed to topic: %s - %u", mqttThermalDesinfectionTopic, packetIdSub);
   }
   if (strlen(mqttValvePressureTopic) > 0)
   {
     packetIdSub = mqttClient.subscribe(mqttValvePressureTopic, 2);
-    ESP_LOGI(TAG, "Subscribed to topic: %s - %u", mqttValvePressureTopic, packetIdSub);
+    Logger.log(LOGID, ELOG_LEVEL_INFO, "Subscribed to topic: %s - %u", mqttValvePressureTopic, packetIdSub);
   }
   digitalWrite(LED_BUILTIN, HIGH);
   mqttSendTopics(true);
@@ -849,19 +868,19 @@ void onMqttDisconnect(AsyncMqttClientDisconnectReason reason)
   strftime(mqttDisconnectTime, 20, "%d.%m.%Y %T", &localTime);
   mqttDisconnectTimestamp = timeClient.getEpochTime();
 
-  ESP_LOGI(TAG, " [%8u] Disconnected from the broker reason = %s", millis(), mqttDisconnectReason.c_str());
+  Logger.log(LOGID, ELOG_LEVEL_INFO, " [%8u] Disconnected from the broker reason = %s", millis(), mqttDisconnectReason.c_str());
   digitalWrite(LED_BUILTIN, LOW);
 
   if (WiFi.isConnected())
   {
-    ESP_LOGI(TAG, " [%8u] Reconnecting to MQTT..", millis());
+    Logger.log(LOGID, ELOG_LEVEL_INFO, " [%8u] Reconnecting to MQTT..", millis());
     mqttReconnectTimer.once(5, connectToMqtt);
   }
 }
 
 void onMqttSubscribe(uint16_t packetId, uint8_t qos)
 {
-  ESP_LOGI(TAG, " [%8u] Subscribe acknowledged id: %u, qos: %u", millis(), packetId, qos);
+  Logger.log(LOGID, ELOG_LEVEL_INFO, " [%8u] Subscribe acknowledged id: %u, qos: %u", millis(), packetId, qos);
 }
 
 void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total)
@@ -871,22 +890,22 @@ void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties 
   new_payload[len] = '\0';
   if (strcmp(topic, mqttPumpTopic) == 0)
   {
-    ESP_LOGI(TAG, "MQTT pump: %s", new_payload);
+    Logger.log(LOGID, ELOG_LEVEL_INFO, "MQTT pump: %s", new_payload);
     mqttPump = (strcmp(mqttPumpValue, new_payload) == 0);
   }
   else if (strcmp(topic, mqttThermalDesinfectionTopic) == 0)
   {
-    ESP_LOGI(TAG, "MQTT thermal desinfection: %s", new_payload);
+    Logger.log(LOGID, ELOG_LEVEL_INFO, "MQTT thermal desinfection: %s", new_payload);
     mqttThermalDesinfection = (strcmp(mqttThermalDesinfectionValue, new_payload) == 0);
   }
   else if (strcmp(topic, mqttHeaterStatusTopic) == 0)
   {
-    ESP_LOGI(TAG, "MQTT heater status: %s", new_payload);
+    Logger.log(LOGID, ELOG_LEVEL_INFO, "MQTT heater status: %s", new_payload);
     mqttHeaterStatus = (strcmp(mqttHeaterStatusValue, new_payload) == 0);
   }
   else if (strcmp(topic, mqttValvePressureTopic) == 0)
   {
-    ESP_LOGI(TAG, "MQTT pressure: %s", new_payload);
+    Logger.log(LOGID, ELOG_LEVEL_INFO, "MQTT pressure: %s", new_payload);
     valvePressure = atof(new_payload);
   }
 }
@@ -920,17 +939,17 @@ void mqttPublish(const char *topic, const char *payload, bool force, bool jsonAd
           object["date"] = timeStr;
           serializeJson(object, newPayloadStr);
         }
-        ESP_LOGD(TAG, "MQTT send: %s = %s", tempTopicStr.c_str(), newPayloadStr.c_str());
+        Logger.log(LOGID, ELOG_LEVEL_DEBUG, "MQTT send: %s = %s", tempTopicStr.c_str(), newPayloadStr.c_str());
         if (mqttClient.publish(tempTopicStr.c_str(), 0, true, newPayloadStr.c_str()) > 0)
           // TODO: Statt dem String ggf. einen Hash wegspeichern zur Optimierung der Speichernutzung
           mqttLastMessage[topicStr] = payloadStr;
         else
-          ESP_LOGE(TAG, "MQTT (error) not send: %s = %s", tempTopicStr.c_str(), newPayloadStr.c_str());
+          Logger.log(LOGID, ELOG_LEVEL_ERROR, "MQTT (error) not send: %s = %s", tempTopicStr.c_str(), newPayloadStr.c_str());
       }
     }
     else
     {
-      ESP_LOGW(TAG, "MQTT not send: %s = %s", tempTopicStr.c_str(), payloadStr.c_str());
+      Logger.log(LOGID, ELOG_LEVEL_WARNING, "MQTT not send: %s = %s", tempTopicStr.c_str(), payloadStr.c_str());
     }
   }
 }
@@ -1046,7 +1065,7 @@ void printAddress(DeviceAddress deviceAddress)
   {
     ptr += sprintf(ptr, "%02X", deviceAddress[i]);
   }
-  ESP_LOGI(TAG, "%s", addr);
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "%s", addr);
 }
 
 // function to format a device address
@@ -1111,10 +1130,10 @@ void detectSensors()
 {
   int i;
   // locate devices on the bus
-  ESP_LOGI(TAG, "Searching devices...");
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "Searching devices...");
   if (xSemaphoreTake(tempSemaphore, 15000))
   { // Warte auf Zugriff auf Sensoren
-    ESP_LOGI(TAG, "Found %u devices.", sensors.getDeviceCount());
+    Logger.log(LOGID, ELOG_LEVEL_INFO, "Found %u devices.", sensors.getDeviceCount());
 
     // fill connected devices for configuration
     for (i = 0; i < sensors.getDeviceCount(); i++)
@@ -1130,7 +1149,7 @@ void detectSensors()
   }
   else
   {
-    ESP_LOGW(TAG, "Could not take tempSemaphore to detect sensors!");
+    Logger.log(LOGID, ELOG_LEVEL_WARNING, "Could not take tempSemaphore to detect sensors!");
   }  
   hexStr2Arr(sensorInt_id, tempIntParam.value(), 8);
   hexStr2Arr(sensorOut_id, tempOutParam.value(), 8);
@@ -1177,7 +1196,7 @@ void tempTask(void *parameter)
 
   for (;;)
   {
-    ESP_LOGD(TAG, "Requesting temperatures...");
+    Logger.log(LOGID, ELOG_LEVEL_DEBUG, "Requesting temperatures...");
     if (xSemaphoreTake(tempSemaphore, 1000))
       {
         sensors.requestTemperatures();
@@ -1187,7 +1206,7 @@ void tempTask(void *parameter)
       report.tempRet = sensors.getTempC(ids.ret);
       report.tempInt = sensors.getTempC(ids.intl);
       xSemaphoreGive(tempSemaphore); // Gib Zugriff auf Sensoren frei
-      ESP_LOGD(TAG, "Temperatures read: out=%.2f C°, ret=%.2f C°, int=%.2f C°", report.tempOut, report.tempRet, report.tempInt);
+      Logger.log(LOGID, ELOG_LEVEL_DEBUG, "Temperatures read: out=%.2f C°, ret=%.2f C°, int=%.2f C°", report.tempOut, report.tempRet, report.tempInt);
       report.outConnected = !(report.tempOut == DEVICE_DISCONNECTED_C);
       report.retConnected = !(report.tempRet == DEVICE_DISCONNECTED_C);
       report.intConnected = !(report.tempInt == DEVICE_DISCONNECTED_C);
@@ -1202,7 +1221,7 @@ void tempTask(void *parameter)
     }
     else
     {
-      ESP_LOGW(TAG, "Could not take tempSemaphore in tempTask!");
+      Logger.log(LOGID, ELOG_LEVEL_WARNING, "Could not take tempSemaphore in tempTask!");
     }
   }
 }
@@ -1219,7 +1238,7 @@ void getLocalTime()
   struct tm timeinfo;
   if (!getLocalTime(&timeinfo))
   {
-    ESP_LOGW(TAG, "Failed to obtain time");
+    Logger.log(LOGID, ELOG_LEVEL_WARNING, "Failed to obtain time");
     return;
   }
   localTime = timeinfo;
@@ -1239,7 +1258,6 @@ void updateDisplay()
   char tempStr[128];
   char uptimeStr[8];
   float temp;
-  unsigned long now = millis();
   unsigned int lineStart = 0;
   unsigned lineEnd = 0;
   unsigned int lineCnt = 1;
@@ -1321,17 +1339,17 @@ void updateDisplay()
     display.setTextAlignment(TEXT_ALIGN_LEFT);
     for (int i = lineStart; i <= lineEnd; i++)
     { // display last 5 pumpOn Events in right order
-      byte arrIndex = mod((((int)pumpCnt) - i), nils_length(pump));
+      short arrIndex = mod((((int)pumpCnt) - i), nils_length(pump));
       display.drawString(0, lineCnt * 10 + 2, String(i + 1) + ": " + pump[arrIndex].substring(1, pump[arrIndex].length() - 4));
       lineCnt++;
     }
-    if ((10000 < now - displayPageSubChange))
+    if ((10000 < nowMillis - displayPageSubChange))
     {
       if (displayPageLastRuns < nils_length(pump) / 5)
         displayPageLastRuns++;
       else
         displayPageLastRuns = 1;
-      displayPageSubChange = now;
+      displayPageSubChange = nowMillis;
     }
     break;
   case 2:
@@ -1402,9 +1420,9 @@ void updateDisplay()
         WiFi.mode(WIFI_STA);
         WiFi.disconnect();
       }
-      if ((60000 < now - lastScan) && WiFi.getMode() == WIFI_STA) // blocked for 60s
+      if ((60000 < nowMillis - lastScan) && WiFi.getMode() == WIFI_STA) // blocked for 60s
       {
-        ESP_LOGI(TAG, "scan started");
+        Logger.log(LOGID, ELOG_LEVEL_INFO, "scan started");
         WiFi.scanDelete();
         WiFi.scanNetworks(true);
         networksPage = 1;
@@ -1412,12 +1430,12 @@ void updateDisplay()
       }
       networksFound = WiFi.scanComplete();
 
-      ESP_LOGI(TAG, "Scan status: %d", networksFound);
+      Logger.log(LOGID, ELOG_LEVEL_INFO, "Scan status: %d", networksFound);
       if (networksFound == -1)
       {
         display.setFont(ArialMT_Plain_24);
         display.drawString(64, 24, txtSearching[langu]);
-        lastScan = now;
+        lastScan = nowMillis;
       }
       else if (networksFound == -2)
       {
@@ -1426,19 +1444,19 @@ void updateDisplay()
       }
       else if (networksFound == 0)
       {
-        ESP_LOGI(TAG, "Networks found: %d", networksFound);
+        Logger.log(LOGID, ELOG_LEVEL_INFO, "Networks found: %d", networksFound);
         display.setFont(ArialMT_Plain_16);
         display.drawString(64, 24, txtNoAp[langu]);
       }
       else
       {
-        ESP_LOGI(TAG, "Networks found: %d", networksFound);
+        Logger.log(LOGID, ELOG_LEVEL_INFO, "Networks found: %d", networksFound);
         if (networksPageFirstCall)
         {
           networksPageFirstCall = false;
-          displayPageSubChange = now;
+          displayPageSubChange = nowMillis;
           networksPageTotal = (int)ceil(networksFound / 5.0);
-          lastScan = now;
+          lastScan = nowMillis;
         }
         lineStart = ((networksPage)-1) * 5;
         lineEnd = min((lineStart + 4), (unsigned int)networksFound);
@@ -1448,19 +1466,19 @@ void updateDisplay()
         for (int i = lineStart; i < lineEnd; i++)
         {
           // Print SSID and RSSI for each network found
-          ESP_LOGI(TAG, "%d: %s (%d)%s", i + 1, WiFi.SSID(i).c_str(), WiFi.RSSI(i), (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? " " : "*");
+          Logger.log(LOGID, ELOG_LEVEL_INFO, "%d: %s (%d)%s", i + 1, WiFi.SSID(i).c_str(), WiFi.RSSI(i), (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? " " : "*");
           display.setFont(ArialMT_Plain_10);
           display.setTextAlignment(TEXT_ALIGN_LEFT);
           display.drawString(0, 1 + (10 * lineCnt), String(i + 1) + ": " + String(WiFi.SSID(i)) + " (" + String(WiFi.RSSI(i)) + ")");
           lineCnt++;
         }
-        if ((10000 < now - displayPageSubChange) && networksPageTotal > 1)
+        if ((10000 < nowMillis - displayPageSubChange) && networksPageTotal > 1)
         {
           if (networksPage < networksPageTotal)
             networksPage++;
           else
             networksPage = 1;
-          displayPageSubChange = now;
+          displayPageSubChange = nowMillis;
         }
       }
     }
@@ -1481,13 +1499,13 @@ void displayOn()
 void pumpOn()
 {
   char tempStr[128];
-  ESP_LOGI(TAG, "Turn on circulation");
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "Turn on circulation");
   pumpRunning = true;
   pumpStartedAt = millis();
   digitalWrite(PUMPPIN, LOW);
   mqttSendTopics();
   strftime(tempStr, 40, "%d.%m.%Y %T", &localTime);
-  ESP_LOGI(TAG, "Pump on: %s", tempStr);
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "Pump on: %s", tempStr);
   if (pumpCntInit)
     pumpCntInit = false;
   else if (++pumpCnt > nils_length(pump) - 1)
@@ -1497,7 +1515,7 @@ void pumpOn()
 
 void pumpOff()
 {
-  ESP_LOGI(TAG, "Turn off circulation");
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "Turn off circulation");
   pumpRunning = false;
   pump[pumpCnt] += " (" + String((int)round((millis() - pumpStartedAt) / 1000 / 60)) + " min.)";
   digitalWrite(PUMPPIN, HIGH);
@@ -1538,11 +1556,11 @@ void checkPump()
       {
         if ((((tempDiff >= tempDiffTrigger && (mqttHeaterStatus || !mqttClient.connected())) || mqttPump) && (300000 < millis() - pumpBlock || pumpFirstCall)) || 86400000 < millis() - pumpStartedAt)
         { // smallest temp change is 0,0625°C,
-          ESP_LOGI(TAG, "Temperature Delta: %.2f", tempDiff);
+          Logger.log(LOGID, ELOG_LEVEL_INFO, "Temperature Delta: %.2f", tempDiff);
           if (mqttPump)
           {
             mqttPump = false;
-            ESP_LOGI(TAG, "MQTT pump action done");
+            Logger.log(LOGID, ELOG_LEVEL_INFO, "MQTT pump action done");
           }
           pumpBlock = millis();
           pumpFirstCall = false;
@@ -1561,7 +1579,7 @@ void valveOpen()
 {
   char tempStr[128];
 
-  ESP_LOGI(TAG, "Open valve - %u", valveState);
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "Open valve - %u", valveState);
   if (!valveState)
   {
     valveState = true;
@@ -1575,7 +1593,7 @@ void valveOpen()
     digitalWrite(VALVEPIN, LOW);
 
     strftime(tempStr, 40, "%d.%m.%Y %T", &localTime);
-    ESP_LOGI(TAG, "%s", tempStr);
+    Logger.log(LOGID, ELOG_LEVEL_INFO, "%s", tempStr);
     if (valveHistCntInit)
       valveHistCntInit = false;
     else if (++valveHistCnt > nils_length(valveHist) - 1)
@@ -1586,7 +1604,7 @@ void valveOpen()
 
 void valveClose()
 {
-  ESP_LOGI(TAG, "Close valve - %u", valveState);
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "Close valve - %u", valveState);
   if (valveState)
   {
     valveState = false;
@@ -1635,7 +1653,6 @@ void checkValve()
 bool onSec1Timer(void *)
 {
   updateTime();
-  tempRead();
   checkPump();
   checkValve();
   mqttSendTopics();
@@ -1655,7 +1672,7 @@ bool onMin1Timer(void *)
 {
   mqttPublishUptime();
   mqttPublish(MQTT_PUB_WIFI, getWifiJson().c_str(), false, true);
-  ESP_LOGI(TAG, "Add pressure to calc: %.2f", valvePressure);
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "Add pressure to calc: %.2f", valvePressure);
   valvePressureAvg.addValue(valvePressure);
   mqttPublish(MQTT_PUB_VALVE_PRESSURE_AVG, String(valvePressureAvg.getAverage()).c_str(), false, false);
 
@@ -1689,7 +1706,7 @@ void handleResetValveError()
 /* #region button */
 void handleUserBtnClick(void *oneButton)
 {
-  ESP_LOGD(TAG, "Button pressed ms: %u", ((OneButton *)oneButton)->getPressedMs());
+  Logger.log(LOGID, ELOG_LEVEL_DEBUG, "Button pressed ms: %u", ((OneButton *)oneButton)->getPressedMs());
   if (manualMode)
   {
     if (pumpRunning)
@@ -1703,7 +1720,7 @@ void handleUserBtnClick(void *oneButton)
       displayOn();
     else
     {
-      displayPageSubChange = now; // init the subpage timer
+      displayPageSubChange = nowMillis; // init the subpage timer
       if (displayPage == 4)
         displayPage = 0;
       else
@@ -1725,14 +1742,14 @@ void handleUserBtnClick(void *oneButton)
 
 void handleUserBtnLongPress(void *oneButton)
 {
-  ESP_LOGD(TAG, "Long press detected: %u", ((OneButton *)oneButton)->getPressedMs());
+  Logger.log(LOGID, ELOG_LEVEL_DEBUG, "Long press detected: %u", ((OneButton *)oneButton)->getPressedMs());
   manualMode = !manualMode;
 }
 
 void handleUserBtnDoublePress(void *oneButton)
 {
-  ESP_LOGD(TAG, "Double press detected: %u", ((OneButton *)oneButton)->getPressedMs());
-  static byte doublePressCnt = 0;
+  static short doublePressCnt = 0;
+  Logger.log(LOGID, ELOG_LEVEL_DEBUG, "Double press detected: %u", ((OneButton *)oneButton)->getPressedMs());
   doublePressCnt++;
   if (doublePressCnt == 1)
     pumpOn();
@@ -1748,79 +1765,11 @@ void handleUserBtnDoublePress(void *oneButton)
 
 void handleResetBtnLongPress(void *oneButton)
 {
-  ESP_LOGD(TAG, "Reset button long press detected: %u", ((OneButton *)oneButton)->getPressedMs());
+  Logger.log(LOGID, ELOG_LEVEL_DEBUG, "Reset button long press detected: %u", ((OneButton *)oneButton)->getPressedMs());
   iotWebConf.getRootParameterGroup()->applyDefaultValue();
   iotWebConf.saveConfig();
   needReset = true;
-  ESP_LOGI(TAG, "Factory reset performed, restarting...");
-}
-/* #endregion */
-
-/* #region logging */
-void sendSyslogMessage(int level, const char *message) {
-  if (strlen(syslogServer) == 0 || syslogPort == 0) return;
-  
-  // Syslog priority: facility * 8 + level
-  // Facility 1 = user-level messages
-  int priority = 1 * 8 + level;
-  
-  // Simple syslog format: <priority>timestamp hostname tag: message
-  char syslogMsg[1024];
-  struct tm timeinfo;
-  if (getLocalTime(&timeinfo)) {
-    strftime(syslogMsg, sizeof(syslogMsg), "%Y-%m-%dT%H:%M:%S", &timeinfo);
-  } else {
-    strcpy(syslogMsg, "unknown-time");
-  }
-  
-  char fullMsg[1100];
-  snprintf(fullMsg, sizeof(fullMsg), "<%d>%s %s %s: %s", priority, syslogMsg, hostname, TAG, message);
-  
-  syslogUDP.beginPacket(syslogServer, syslogPort);
-  syslogUDP.write((uint8_t*)fullMsg, strlen(fullMsg));
-  syslogUDP.endPacket();
-}
-
-void applySyslogLogLevel()
-{
-  const char *level = syslogLogLevelParam.value();
-  if (strcmp(level, "NONE") == 0)
-    esp_log_level_set(TAG, ESP_LOG_NONE);
-  else if (strcmp(level, "ERROR") == 0)
-    esp_log_level_set(TAG, ESP_LOG_ERROR);
-  else if (strcmp(level, "WARN") == 0)
-    esp_log_level_set(TAG, ESP_LOG_WARN);
-  else if (strcmp(level, "INFO") == 0)
-    esp_log_level_set(TAG, ESP_LOG_INFO);
-  else if (strcmp(level, "DEBUG") == 0)
-    esp_log_level_set(TAG, ESP_LOG_DEBUG);
-  else if (strcmp(level, "VERBOSE") == 0)
-    esp_log_level_set(TAG, ESP_LOG_VERBOSE);
-  else
-    esp_log_level_set(TAG, ESP_LOG_INFO);
-
-  ESP_LOGI(TAG, "ESP_LOG level set to %s", level);
-}
-
-int custom_vprintf(const char *fmt, va_list args) {
-  char buf[1024];
-  int len = vsnprintf(buf, sizeof(buf), fmt, args);
-  if (len > 0)
-  {
-    // Print to serial
-    uart_write_bytes(UART_NUM_0, buf, len);
-    // Send to syslog if configured
-    if (strlen(syslogServer) > 0) {
-      int level = LOG_INFO;
-      if (strstr(buf, "[E]")) level = LOG_ERR;
-      else if (strstr(buf, "[W]")) level = LOG_WARNING;
-      else if (strstr(buf, "[I]")) level = LOG_INFO;
-      else if (strstr(buf, "[D]")) level = LOG_DEBUG;
-      else if (strstr(buf, "[V]")) level = LOG_DEBUG;
-      sendSyslogMessage(level, buf);
-    }
-  }
-  return len;
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "Factory reset performed, restarting...");
 }
 /* #endregion */
 
@@ -1828,7 +1777,8 @@ void setup()
 {
   // basic setup
   Serial.begin(115200);
-  esp_log_set_vprintf(custom_vprintf);
+  Logger.registerSerial(LOGID, ELOG_LEVEL_DEBUG, TAG, Serial);
+
   // initCoreDumpFlash();
   // esp_core_dump_init();
   pinMode(LED_BUILTIN, OUTPUT);
@@ -1850,33 +1800,30 @@ void setup()
   // esp_task_wdt_add(NULL); // current task (loopTask)
   handleCrashCounter();
   checkForFailover();
-  ESP_LOGI(TAG, "Watchdog initialized and crash counter checked.");
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "Watchdog initialized and crash counter checked.");
 
   display.init();
   display.setFont(ArialMT_Plain_10);
   displayOn();
-  ESP_LOGI(TAG, "Display ready");
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "Display ready");
 
-  // WiFi.onEvent(onWifiConnected, ARDUINO_EVENT_WIFI_STA_CONNECTED);
   WiFi.onEvent(onWifiDisconnect, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   // WiFi.setTxPower(WIFI_POWER_19_5dBm);
 
   // Start NVS configuration
   nvs_stats_t nvs_stats;
   nvs_get_stats(NULL, &nvs_stats);
-  ESP_LOGI(TAG, "NVS-Statistics:");
-  ESP_LOGI(TAG, "Used entries: %u", nvs_stats.used_entries);
-  ESP_LOGI(TAG, "Free entries: %u", nvs_stats.free_entries);
-  ESP_LOGI(TAG, "Total entries: %u", nvs_stats.total_entries);
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "NVS-Statistics:");
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "Used entries: %u", nvs_stats.used_entries);
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "Free entries: %u", nvs_stats.free_entries);
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "Total entries: %u", nvs_stats.total_entries);
 
   changeNvsMode(false);
   valveOpenAt = preferences.getULong("valveOpenAt", 0);
   valveOpenAt = preferences.getULong("valveOpenAtTs", 0);
   valveCloseAt = preferences.getULong("valveCloseAt", 0);
   valveCloseAt = preferences.getULong("valveCloseAtTs", 0);
-  ESP_LOGI(TAG, "NVS loaded");
-
-  applySyslogLogLevel();
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "NVS loaded");
 
   iotWebConf.setupUpdateServer(
       [](const char *updatePath)
@@ -1924,29 +1871,28 @@ void setup()
   bool validConfig = iotWebConf.init();
   if (!validConfig)
   {
-    ESP_LOGW(TAG, "Invalid config detected - restoring WiFi settings...");
+    Logger.log(LOGID, ELOG_LEVEL_WARNING, "Invalid config detected - restoring WiFi settings...");
     // much better handling than iotWebConf library to avoid lost wifi on configuration change
     if (preferences.isKey("apPassword"))
       strncpy(iotWebConf.getApPasswordParameter()->valueBuffer, preferences.getString("apPassword").c_str(), iotWebConf.getApPasswordParameter()->getLength());
     else
-      ESP_LOGW(TAG, "AP Password not found for restauration.");
+      Logger.log(LOGID, ELOG_LEVEL_WARNING, "AP Password not found for restauration.");
     if (preferences.isKey("wifiSsid"))
       strncpy(iotWebConf.getWifiSsidParameter()->valueBuffer, preferences.getString("wifiSsid").c_str(), iotWebConf.getWifiSsidParameter()->getLength());
     else
-      ESP_LOGW(TAG, "WiFi SSID not found for restauration.");
+      Logger.log(LOGID, ELOG_LEVEL_WARNING, "WiFi SSID not found for restauration.");
     if (preferences.isKey("wifiPassword"))
       strncpy(iotWebConf.getWifiPasswordParameter()->valueBuffer, preferences.getString("wifiPassword").c_str(), iotWebConf.getWifiPasswordParameter()->getLength());
     else
-      ESP_LOGW(TAG, "WiFi Password not found for restauration.");
+      Logger.log(LOGID, ELOG_LEVEL_WARNING, "WiFi Password not found for restauration.");
     iotWebConf.saveConfig();
     iotWebConf.resetWifiAuthInfo();
   }
-
   langu = atoi(languParam.value());
   tempDiffTrigger = atof(tempDiffTriggerParam.valueBuffer);
-  ESP_LOGI(TAG, "tempDiffTrigger set to: %.2f", tempDiffTrigger);
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "tempDiffTrigger set to: %.2f", tempDiffTrigger);
   valveMaxOpen = atoi(valveMaxOpenParam.valueBuffer);
-  ESP_LOGI(TAG, "valveMaxOpen set to: %d", valveMaxOpen);
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "valveMaxOpen set to: %d", valveMaxOpen);
 
   // -- Set up required URL handlers on the web server.
   server.on("/", handleRoot);
@@ -1961,7 +1907,7 @@ void setup()
   server.on("/crash", startCrash); // Adress to create a coredump for testing
   server.on("/resetValveError", handleResetValveError);
   // TODO: detectSensors per Link aufrufen
-  ESP_LOGI(TAG, "Wifi manager ready.");
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "Wifi manager ready.");
 
   strcpy(mqttWillTopic, mqttTopicPath);
   strcat(mqttWillTopic, MQTT_PUB_STATUS);
@@ -1974,7 +1920,7 @@ void setup()
   if (mqttUser != "")
     mqttClient.setCredentials(mqttUser, mqttPassword);
   mqttClient.setServer(mqttServer, MQTT_PORT);
-  ESP_LOGI(TAG, "MQTT ready");
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "MQTT ready");
 
   // start OneWire sensor reading
   tempSemaphore = xSemaphoreCreateBinary();
@@ -1990,17 +1936,17 @@ void setup()
   memcpy(pIds->intl, sensorInt_id, sizeof(DeviceAddress_t));
   // Erstelle Tasks
   xTaskCreatePinnedToCore(tempTask, "TempTask", 4096, pIds, 1, &tempTaskHandle, 1);
-  ESP_LOGI(TAG, "Sensors ready");
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "Sensors ready");
 
   // configure the timezone
   configTime(0, 0, ntpServer);
   setTimezone(ntpTimezone);
-  ESP_LOGI(TAG, "NTP ready");
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "NTP ready");
 
   // Init OTA function
   ArduinoOTA.onStart([]()
                      {
-    ESP_LOGI(TAG, "Start OTA");
+    Logger.log(LOGID, ELOG_LEVEL_INFO, "Start OTA");
     displayOn();
     display.clear();
     display.setFont(ArialMT_Plain_10);
@@ -2010,12 +1956,12 @@ void setup()
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total)
                         {
     // esp_task_wdt_reset();
-    ESP_LOGI(TAG, "OTA Progress: %u%%", (progress / (total / 100)));
+    Logger.log(LOGID, ELOG_LEVEL_INFO, "OTA Progress: %u%%", (progress / (total / 100)));
     display.drawProgressBar(4, 32, 120, 8, progress / (total / 100) );
     display.display(); });
   ArduinoOTA.onEnd([]()
                    {
-    ESP_LOGI(TAG, "\nEnd OTA");
+    Logger.log(LOGID, ELOG_LEVEL_INFO, "\nEnd OTA");
     display.clear();
     display.setFont(ArialMT_Plain_10);
     display.setTextAlignment(TEXT_ALIGN_CENTER_BOTH);
@@ -2023,22 +1969,22 @@ void setup()
     display.display(); });
   ArduinoOTA.onError([](ota_error_t error)
                      {
-    ESP_LOGE(TAG, "Error[%u]: ", error);
-    if (error == OTA_AUTH_ERROR) ESP_LOGE(TAG, "Auth Failed");
-    else if (error == OTA_BEGIN_ERROR) ESP_LOGE(TAG, "Begin Failed");
-    else if (error == OTA_CONNECT_ERROR) ESP_LOGE(TAG, "Connect Failed");
-    else if (error == OTA_RECEIVE_ERROR) ESP_LOGE(TAG, "Receive Failed");
-    else if (error == OTA_END_ERROR) ESP_LOGE(TAG, "End Failed");
+    Logger.log(LOGID, ELOG_LEVEL_ERROR, "Error[%u]: ", error);
+    if (error == OTA_AUTH_ERROR) Logger.log(LOGID, ELOG_LEVEL_ERROR, "Auth Failed");
+    else if (error == OTA_BEGIN_ERROR) Logger.log(LOGID, ELOG_LEVEL_ERROR, "Begin Failed");
+    else if (error == OTA_CONNECT_ERROR) Logger.log(LOGID, ELOG_LEVEL_ERROR, "Connect Failed");
+    else if (error == OTA_RECEIVE_ERROR) Logger.log(LOGID, ELOG_LEVEL_ERROR, "Receive Failed");
+    else if (error == OTA_END_ERROR) Logger.log(LOGID, ELOG_LEVEL_ERROR, "End Failed");
     display.clear();
     display.setFont(ArialMT_Plain_24);
     display.drawString(display.getWidth() / 2, display.getHeight() / 2, "OTA Failed"); });
-  ESP_LOGI(TAG, "OTA ready");
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "OTA ready");
 
   // Timers
   timer.every(1000, onSec1Timer);
   timer.every(10000, onSec10Timer);
   timer.every(60000, onMin1Timer);
-  ESP_LOGI(TAG, "Timer ready");
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "Timer ready");
   
   // Button
   userBtn.attachClick(handleUserBtnClick, &userBtn);
@@ -2047,7 +1993,7 @@ void setup()
   userBtn.setLongPressIntervalMs(1000);
   resetBtn.attachLongPressStop(handleResetBtnLongPress, &resetBtn);
   resetBtn.setLongPressIntervalMs(1000);
-  ESP_LOGI(TAG, "Buttons ready");
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "Buttons ready");
 
   // Firmware als gültig markieren
   esp_ota_mark_app_valid_cancel_rollback();
@@ -2056,6 +2002,7 @@ void setup()
 void loop()
 {
   // esp_task_wdt_reset();
+  nowMillis = millis();
   ArduinoOTA.handle();
   iotWebConf.doLoop();
   timer.tick();
@@ -2064,12 +2011,12 @@ void loop()
 
   if (needReset)
   {
-    ESP_LOGI(TAG, "Rebooting in 1 second.");
+    Logger.log(LOGID, ELOG_LEVEL_INFO, "Rebooting in 1 second.");
     iotWebConf.delay(1000);
     ESP.restart();
   }
 
-  if (!manualMode && displayState && 60000 < now - displayOnAt)
+  if (!manualMode && displayState && 60000 < nowMillis - displayOnAt)
   { // switch display off after 10mins
     display.displayOff();
     displayTimer.detach();
