@@ -43,10 +43,6 @@ static const char *TAG = "HotWaterPump";
 #define LOG_INFO 6
 #define LOG_DEBUG 7
 
-// watchdog
-RTC_DATA_ATTR int crashCounter = 0;
-RTC_DATA_ATTR uint32_t lastCrashTime = 0;
-
 // syslog
 char syslogServer[STRING_LEN];
 char syslogPortStr[6];
@@ -446,40 +442,48 @@ void handleCrashCounter()
 {
   // Reset-Gründe prüfen
   esp_reset_reason_t reason = esp_reset_reason();
-
   bool isCrash =
       reason == ESP_RST_TASK_WDT ||
       reason == ESP_RST_WDT ||
       reason == ESP_RST_PANIC ||
       reason == ESP_RST_BROWNOUT;
 
-  if (isCrash)
-  {
-    // Wenn letzter Crash zu lange her → Counter verfallen lassen
-    if (nowMillis - lastCrashTime > 600000)
-    { // 600 Sekunden = 10 Minuten
-      crashCounter = 0;
-    }
+  Preferences prefs;
+  prefs.begin("sys", false);
+  int crashCounter = prefs.getInt("crashCounter", 0);
 
-    crashCounter++;
-    lastCrashTime = nowMillis;
-  }
-  else
+  if (crashCounter >= 10)
   {
-    // Normaler Boot → Counter verfallen lassen
-    crashCounter = 0;
-    lastCrashTime = nowMillis;
-  }
-}
+    Logger.log(LOGID, ELOG_LEVEL_ERROR, "Device has crashed %d times in a row. Initiating failover to backup partition.", crashCounter);
+    // clear persisted counter before switching partition to avoid replay loops
+    prefs.putInt("crashCounter", 0);
+    prefs.end();
 
-void checkForFailover()
-{
-  if (crashCounter >= 3)
-  {
     const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
     esp_ota_set_boot_partition(next);
     esp_restart();
   }
+
+  if (isCrash)
+  {
+    // Increment persisted counter so it survives panics
+    crashCounter++;
+    prefs.putInt("crashCounter", crashCounter);
+    Logger.log(LOGID, ELOG_LEVEL_INFO, "Reset reason: %s, persisted crashCounter: %d", verbose_print_reset_reason(reason).c_str(), crashCounter);
+  }
+  else if (reason == ESP_RST_SW)
+  {
+    // Software reset: preserve persisted counter
+    Logger.log(LOGID, ELOG_LEVEL_INFO, "Software reset, preserved persisted crashCounter: %d", crashCounter);
+  }
+  else
+  {
+    // Normal boot -> clear persisted counter
+    crashCounter = 0;
+    prefs.putInt("crashCounter", crashCounter);
+    Logger.log(LOGID, ELOG_LEVEL_INFO, "Normal boot, cleared persisted crashCounter");
+  }
+  prefs.end();
 }
 /* #endregion */
 
@@ -702,7 +706,7 @@ void handleRoot()
   // }
   const esp_partition_t *running = esp_ota_get_running_partition();
   const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
-  s += "<p>Firmware: running  " + String(running->label) + " - OTA updates to " + String(next->label) + "</p>";
+  s += "<p>Firmware: running  " + String(running->label) + " - OTA updates " + String(next->label) + "</p>";
 
   s += "</fieldset>";
 
@@ -1042,7 +1046,7 @@ String getSysinfoJson()
 
   object["sys"]["reset_reason"] = esp_reset_reason();
   object["sys"]["reset_reason_msg"] = verbose_print_reset_reason(esp_reset_reason());
-  object["sys"]["reset_crash_counter"] = crashCounter;
+  object["sys"]["firmware_partition"] = esp_ota_get_running_partition()->label;
   // object["sys"]["core_dump"] = esp_core_dump_image_check();
   // object["system"]["heap_free"] = esp_get_free_internal_heap_size();    // in bytes
   object["sys"]["heap_min_free"] = esp_get_minimum_free_heap_size(); // in bytes
@@ -1799,7 +1803,6 @@ void setup()
   // esp_task_wdt_init(&wdt_config);
   // esp_task_wdt_add(NULL); // current task (loopTask)
   handleCrashCounter();
-  checkForFailover();
   Logger.log(LOGID, ELOG_LEVEL_INFO, "Watchdog initialized and crash counter checked.");
 
   display.init();
@@ -1824,7 +1827,7 @@ void setup()
   valveCloseAt = preferences.getULong("valveCloseAt", 0);
   valveCloseAt = preferences.getULong("valveCloseAtTs", 0);
   Logger.log(LOGID, ELOG_LEVEL_INFO, "NVS loaded");
-
+  vTaskDelay(pdMS_TO_TICKS(50)); // Wait for Logging to complete
   iotWebConf.setupUpdateServer(
       [](const char *updatePath)
       { httpUpdater.setup(&server, updatePath); },
