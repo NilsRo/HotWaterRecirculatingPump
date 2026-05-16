@@ -1981,6 +1981,8 @@ void setup()
     display.clear();
     display.setFont(ArialMT_Plain_24);
     display.drawString(display.getWidth() / 2, display.getHeight() / 2, "OTA Failed"); });
+
+  ArduinoOTA.setPassword(iotWebConf.getApPasswordParameter()->valueBuffer);
   Logger.log(LOGID, ELOG_LEVEL_INFO, "OTA ready");
 
   // Timers
