@@ -39,9 +39,15 @@ On first start the thing will open an Access Point named "Zirkulationspumpe" to 
    1. publish the following topics (folder structure can be changed):
       * "ww/ht/dhw_Tflow_measured": out temperature of the warm water
       * "ww/ht/dhw_Treturn": return temperature of the warm water circulation
+      * "ww/ht/dhw_Tdelta": difference detected in the 5s time window
       * "ww/ht/Tint": system internal temperature
       * "ww/ht/dhw_pump_circulation": pump is running or not
+      * "ww/ht/dhw_valve_opened": valve is currently open (true/false)
+      * "ww/ht/dhw_valve_sec_opened": how many seconds the valve has been open
+      * "ww/ht/dhw_valve_sec_to_refill": seconds until a refill was neccessary. Could be used for alerting purposes if there is a leakage.
+      * "ww/ht/dhw_valve_pressure_avg": average system pressure value
       * "ww/ht/status": availability of the system is connected to mqtt broker (Online) or not (Offline)
+      * "ww/ht/wifi": wifi related infos like signal quality
       * "ww/ht/sysinfo": status of the system showing the actual mode as Json
         * mode 
           * auto - automatic mode
@@ -76,3 +82,4 @@ On first start the thing will open an Access Point named "Zirkulationspumpe" to 
 * Increase the pumps flow to the maximum that the water goes through the pipes as fast as possible.
 * Setup special schedules via a smart home (MQTT) if you like to have warm water on request (e.g. by phone) or at a specific time.
 * second relay channel is actually unused - suggest how to use it if you need
+* If you are using separate networks for IoT devices it is not possible to flash the device with ArduinoOTA as it using broadcast messages that are usually dropped in the firewall. For that setup you should use HTTP upload in the config page to upload the firmware.bin.
