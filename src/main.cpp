@@ -269,8 +269,9 @@ float roundTo(float value, int decimals)
 String getStatus();
 String getWifiJson();
 String getSysinfoJson();
-void mqttPublish(const char *topic, const char *payload, bool force, bool jsonAddTimstamp);
+void mqttPublish(const char *topic, const char *payload, bool force = false, bool jsonAddTimstamp = false, bool addTopicPath = true);
 void mqttSendTopics(bool mqttInit = false);
+void mqttPublishHomeAssistantDiscovery();
 /* #endregion */
 
 /* #region coredump */
@@ -279,7 +280,7 @@ String verbose_print_reset_reason(esp_reset_reason_t reason)
   switch (reason)
   {
   case ESP_RST_UNKNOWN:
-    return (" Reset reason can not be determined");
+    return ("Reset reason can not be determined");
   case ESP_RST_POWERON:
     return ("Reset due to power-on event");
   case ESP_RST_EXT:
@@ -759,12 +760,21 @@ bool formValidator(iotwebconf::WebRequestWrapper *webRequestWrapper)
   Logger.log(LOGID, ELOG_LEVEL_INFO, "Validating form.");
   bool valid = true;
 
-  // int l = webRequestWrapper->arg(mqttServerParam.getId()).length();
-  // if (l < 3)
-  // {
-  //   mqttServerParam.errorMessage = "Please enter at least 3 chars!";
-  //   valid = false;
-  // }
+  // Validate thing name - only valid DNS hostname characters allowed
+  String thingNameStr = webRequestWrapper->arg(iotWebConf.getThingNameParameter()->getId());
+  Logger.log(LOGID, ELOG_LEVEL_DEBUG, "Checking thingname: %s", thingNameStr.c_str());
+  if (thingNameStr.length() > 0) {
+    for (size_t i = 0; i < thingNameStr.length(); i++) {
+      char c = thingNameStr.charAt(i);
+      // Allow letters, numbers, hyphens, underscores, and periods (valid DNS characters)
+      if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.')) {
+        Logger.log(LOGID, ELOG_LEVEL_DEBUG, "Thingname validation failed at character: %c", c);
+        iotWebConf.getThingNameParameter()->errorMessage = "Only DNS hostname characters allowed (letters, numbers, hyphens, underscores, periods)!";
+        valid = false;
+        break;
+      }
+    }
+  }
 
   return valid;
 }
@@ -843,6 +853,7 @@ void onMqttConnect(bool sessionPresent)
     Logger.log(LOGID, ELOG_LEVEL_INFO, "Subscribed to topic: %s - %u", mqttValvePressureTopic, packetIdSub);
   }
   digitalWrite(LED_BUILTIN, HIGH);
+  mqttPublishHomeAssistantDiscovery();
   mqttSendTopics(true);
 }
 
@@ -919,7 +930,7 @@ bool getMqttActive()
   return String(mqttServer).length() > 0;
 }
 
-void mqttPublish(const char *topic, const char *payload, bool force, bool jsonAddTimstamp)
+void mqttPublish(const char *topic, const char *payload, bool force, bool jsonAddTimstamp, bool addTopicPath)
 {
   static std::map<String, String> mqttLastMessage;
   if (getMqttActive())
@@ -927,7 +938,12 @@ void mqttPublish(const char *topic, const char *payload, bool force, bool jsonAd
     String topicStr = String(topic);
     String payloadStr = String(payload);
     String newPayloadStr = String(payload);
-    String tempTopicStr = String(mqttTopicPath) + String(topic);
+    String tempTopicStr;
+   
+   if (addTopicPath)
+     tempTopicStr = String(mqttTopicPath) + String(topic);
+   else
+     tempTopicStr = String(topic);
 
     if (mqttClient.connected())
     {
@@ -1057,6 +1073,71 @@ String getSysinfoJson()
 
   serializeJson(object, jsonString);
   return jsonString;
+}
+
+void mqttPublishHomeAssistantDiscovery()
+{
+  if (!getMqttActive())
+    return;
+
+  String mac = WiFi.macAddress();
+  mac.replace(":", "");
+  mac.toLowerCase();
+  const String deviceId = String(iotWebConf.getThingName()) + mac;
+  const String deviceName = "Warmwater Recirculation Pump";
+  const String manufacturer = "NilsRo";
+  const String model = "ESP32";
+  const String baseTopic = String(mqttTopicPath).endsWith("/") ? String(mqttTopicPath) : String(mqttTopicPath) + "/";
+
+  struct DiscoveryEntity
+  {
+    const char *component;
+    const char *objectId;
+    const char *name;
+    const char *stateSuffix;
+    const char *deviceClass;
+    const char *unit;
+    const char *payloadOn;
+    const char *payloadOff;
+  } entities[] = {
+    {"sensor", MQTT_PUB_TEMP_OUT, "Flow Temperature", MQTT_PUB_TEMP_OUT, "temperature", "°C", nullptr, nullptr},
+    {"sensor", MQTT_PUB_TEMP_RET, "Return Temperature", MQTT_PUB_TEMP_RET, "temperature", "°C", nullptr, nullptr},
+    {"sensor", MQTT_PUB_TEMP_DIFF, "Temperature Delta", MQTT_PUB_TEMP_DIFF, "temperature_delta", "°C", nullptr, nullptr},
+    {"sensor", MQTT_PUB_TEMP_INT, "Internal Temperature", MQTT_PUB_TEMP_INT, "temperature", "°C", nullptr, nullptr},
+    {"binary_sensor", MQTT_PUB_PUMP, "Pump Circulation", MQTT_PUB_PUMP, "power", nullptr, "1", "0"},
+    {"binary_sensor", MQTT_PUB_VALVE_OPENED, "Valve Opened", MQTT_PUB_VALVE_OPENED, "opening", nullptr, "1", "0"},
+    {"number", MQTT_PUB_VALVE_SEC_OPENED, "Valve Opened (seconds)", MQTT_PUB_VALVE_SEC_OPENED, "duration", "s", nullptr, nullptr},
+    {"number", MQTT_PUB_VALVE_SEC_TO_REFILL, "Seconds between refills", MQTT_PUB_VALVE_SEC_TO_REFILL, "duration", "s", nullptr, nullptr},
+    {"sensor", MQTT_PUB_VALVE_PRESSURE_AVG, "Valve Pressure (avg.)", MQTT_PUB_VALVE_PRESSURE_AVG, "pressure", "bar", nullptr, nullptr}
+  };
+
+  for (auto &entity : entities)
+  {
+    StaticJsonDocument<512> payload;
+    payload["name"] = entity.name;
+    payload["unique_id"] = deviceId + "_" + String(entity.objectId);
+    payload["state_topic"] = baseTopic + String(entity.stateSuffix);
+    if (entity.deviceClass)
+      payload["device_class"] = entity.deviceClass;
+    if (entity.unit)
+      payload["unit_of_measurement"] = entity.unit;
+    if (entity.payloadOn)
+      payload["payload_on"] = entity.payloadOn;
+    if (entity.payloadOff)
+      payload["payload_off"] = entity.payloadOff;
+    payload["device_category"] = "hvac";
+    JsonObject device = payload.createNestedObject("device");
+    JsonArray identifiers = device.createNestedArray("identifiers");
+    identifiers.add(deviceId);
+    device["name"] = deviceName;
+    device["manufacturer"] = manufacturer;
+    device["model"] = model;
+
+    String configTopic = String("homeassistant/") + entity.component + "/" + deviceId + "/" + entity.objectId + "/config";
+    String serialized;
+    serializeJson(payload, serialized);
+    mqttPublish(configTopic.c_str(), serialized.c_str(), true, false, false);
+  }
 }
 /* #endregion */
 
@@ -1797,11 +1878,11 @@ void setup()
 
   // Watchdog für diesen Task aktivieren (3 Minuten Timeout)
   esp_task_wdt_config_t wdt_config = {
-      .timeout_ms = 18000,
+      .timeout_ms = 180000,
       .idle_core_mask = (1 << 1), // Core 1 = loopTask
       .trigger_panic = true};
-  esp_task_wdt_init(&wdt_config);
-  esp_task_wdt_add(NULL); // current task (loopTask)
+  // esp_task_wdt_init(&wdt_config);
+  // esp_task_wdt_add(NULL); // current task (loopTask)
   handleCrashCounter();
   Logger.log(LOGID, ELOG_LEVEL_INFO, "Watchdog initialized and crash counter checked.");
 
@@ -2006,7 +2087,7 @@ void setup()
 
 void loop()
 {
-  esp_task_wdt_reset();
+  // esp_task_wdt_reset();
   nowMillis = millis();
   ArduinoOTA.handle();
   iotWebConf.doLoop();
