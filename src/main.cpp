@@ -1662,6 +1662,7 @@ void checkValve()
 bool onSec1Timer(void *)
 {
   updateTime();
+  tempRead();
   checkPump();
   checkValve();
   mqttSendTopics();
