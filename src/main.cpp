@@ -1796,12 +1796,12 @@ void setup()
   pinMode(WIFICONFIGPIN, INPUT_PULLUP);
 
   // Watchdog für diesen Task aktivieren (3 Minuten Timeout)
-  esp_task_wdt_config_t wdt_config = {
-      .timeout_ms = 18000,
-      .idle_core_mask = (1 << 1), // Core 1 = loopTask
-      .trigger_panic = true};
-  esp_task_wdt_init(&wdt_config);
-  esp_task_wdt_add(NULL); // current task (loopTask)
+  // esp_task_wdt_config_t wdt_config = {
+  //     .timeout_ms = 18000,
+  //     .idle_core_mask = (1 << 1), // Core 1 = loopTask
+  //     .trigger_panic = true};
+  // esp_task_wdt_init(&wdt_config);
+  // esp_task_wdt_add(NULL); // current task (loopTask)
   handleCrashCounter();
   Logger.log(LOGID, ELOG_LEVEL_INFO, "Watchdog initialized and crash counter checked.");
 
@@ -2006,7 +2006,7 @@ void setup()
 
 void loop()
 {
-  esp_task_wdt_reset();
+  // esp_task_wdt_reset();
   nowMillis = millis();
   ArduinoOTA.handle();
   iotWebConf.doLoop();
