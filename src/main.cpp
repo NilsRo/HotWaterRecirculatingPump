@@ -32,7 +32,7 @@
 #define DALLASADRESS_LEN 17
 #define TEMP_QUEUE_LENGTH 1
 #define nils_length(x) ((sizeof(x) / sizeof(0 [x])) / ((size_t)(!(sizeof(x) % sizeof(0 [x])))))
-#define RTOSTaskTemp 1
+#define RTOSTASKTEMP 1
 // #define nils_length( x ) ( sizeof(x) )
 
 static const char *TAG = "HotWaterPump";
@@ -179,9 +179,6 @@ bool mqttThermalDesinfection = false;
 
 Ticker mqttReconnectTimer;
 auto timer = timer_create_default();
-Ticker displayTimer;
-
-
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP);
@@ -1225,7 +1222,7 @@ void tempTask(void *parameter)
 
 void tempRead()
 {
-  if (RTOSTaskTemp)
+  if (RTOSTASKTEMP)
     xQueueReceive(tempQueue, &sensorData, 0);
   else
   {
@@ -1500,7 +1497,12 @@ void displayOn()
   display.displayOn();
   displayState = true;
   displayOnAt = millis();
-  displayTimer.attach_ms(500, updateDisplay);
+}
+
+void displayOff()
+{
+  display.displayOff();
+  displayState = false;
 }
 /* #endregion */
 
@@ -1659,6 +1661,13 @@ void checkValve()
 /* #endregion */
 
 /* #region timer */
+bool onMs200Timer(void *)
+{
+  if (displayState)
+    updateDisplay();
+  return true;
+}
+
 bool onSec1Timer(void *)
 {
   updateTime();
@@ -1939,7 +1948,7 @@ void setup()
   memcpy(pIds->ret, sensorRet_id, sizeof(DeviceAddress_t));
   memcpy(pIds->intl, sensorInt_id, sizeof(DeviceAddress_t));
   // Erstelle Tasks
-  if (RTOSTaskTemp)
+  if (RTOSTASKTEMP)
   {
     sensors.setWaitForConversion(false);
     tempSemaphore = xSemaphoreCreateBinary();
@@ -1995,6 +2004,7 @@ void setup()
   Logger.log(LOGID, ELOG_LEVEL_INFO, "OTA ready");
 
   // Timers
+  timer.every(200, onMs200Timer);
   timer.every(1000, onSec1Timer);
   timer.every(10000, onSec10Timer);
   timer.every(60000, onMin1Timer);
@@ -2032,8 +2042,6 @@ void loop()
 
   if (!manualMode && displayState && 60000 < nowMillis - displayOnAt)
   { // switch display off after 10mins
-    display.displayOff();
-    displayTimer.detach();
-    displayState = false;
+    displayOff();
   }
 }
