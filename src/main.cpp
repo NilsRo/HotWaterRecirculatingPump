@@ -32,6 +32,7 @@
 #define DALLASADRESS_LEN 17
 #define TEMP_QUEUE_LENGTH 1
 #define nils_length(x) ((sizeof(x) / sizeof(0 [x])) / ((size_t)(!(sizeof(x) % sizeof(0 [x])))))
+#define RTOSTaskTemp 1
 // #define nils_length( x ) ( sizeof(x) )
 
 static const char *TAG = "HotWaterPump";
@@ -1135,26 +1136,18 @@ void detectSensors()
   int i;
   // locate devices on the bus
   Logger.log(LOGID, ELOG_LEVEL_INFO, "Searching devices...");
-  if (xSemaphoreTake(tempSemaphore, 15000))
-  { // Warte auf Zugriff auf Sensoren
-    Logger.log(LOGID, ELOG_LEVEL_INFO, "Found %u devices.", sensors.getDeviceCount());
+  Logger.log(LOGID, ELOG_LEVEL_INFO, "Found %u devices.", sensors.getDeviceCount());
 
-    // fill connected devices for configuration
-    for (i = 0; i < sensors.getDeviceCount(); i++)
-    {
-      DeviceAddress sensor_id;
-      char str[5];
-      sensors.getAddress(sensor_id, i);
-      printAddress(sensor_id);
-      snprintf(chooserNames[i], sizeof(chooserNames[i]), "%s - %.2f C°", formatAdress(sensor_id).c_str(), sensors.getTempC(sensor_id));
-      snprintf(chooserValues[i], sizeof(chooserValues[i]), "%s", formatAdress(sensor_id).c_str());
-    }
-    xSemaphoreGive(tempSemaphore); // Gib Zugriff auf Sensoren frei
-  }
-  else
+  // fill connected devices for configuration
+  for (i = 0; i < sensors.getDeviceCount(); i++)
   {
-    Logger.log(LOGID, ELOG_LEVEL_WARNING, "Could not take tempSemaphore to detect sensors!");
-  }  
+    DeviceAddress sensor_id;
+    char str[5];
+    sensors.getAddress(sensor_id, i);
+    printAddress(sensor_id);
+    snprintf(chooserNames[i], sizeof(chooserNames[i]), "%s - %.2f C°", formatAdress(sensor_id).c_str(), sensors.getTempC(sensor_id));
+    snprintf(chooserValues[i], sizeof(chooserValues[i]), "%s", formatAdress(sensor_id).c_str());
+  }
   hexStr2Arr(sensorInt_id, tempIntParam.value(), 8);
   hexStr2Arr(sensorOut_id, tempOutParam.value(), 8);
   hexStr2Arr(sensorRet_id, tempRetParam.value(), 8);
@@ -1232,7 +1225,19 @@ void tempTask(void *parameter)
 
 void tempRead()
 {
-  xQueueReceive(tempQueue, &sensorData, 0);
+  if (RTOSTaskTemp)
+    xQueueReceive(tempQueue, &sensorData, 0);
+  else
+  {
+    sensors.requestTemperatures();
+    sensorData.tempOut = sensors.getTempC(sensorOut_id);
+    sensorData.tempRet = sensors.getTempC(sensorRet_id);
+    sensorData.tempInt = sensors.getTempC(sensorInt_id);
+    Logger.log(LOGID, ELOG_LEVEL_DEBUG, "Temperatures read: out=%.2f C°, ret=%.2f C°, int=%.2f C°", sensorData.tempOut, sensorData.tempRet, sensorData.tempInt);
+    sensorData.outConnected = !(sensorData.tempOut == DEVICE_DISCONNECTED_C);
+    sensorData.retConnected = !(sensorData.tempRet == DEVICE_DISCONNECTED_C);
+    sensorData.intConnected = !(sensorData.tempInt == DEVICE_DISCONNECTED_C);
+  }
 }
 /* #endregion */
 
@@ -1900,7 +1905,6 @@ void setup()
   // -- Set up required URL handlers on the web server.
   server.on("/", handleRoot);
   server.on("/config", []() {
-    detectSensors();
     iotWebConf.handleConfig();
   });
   server.onNotFound([]()
@@ -1909,7 +1913,6 @@ void setup()
   server.on("/deletecoredump", handleDeleteCoreDump);
   server.on("/crash", startCrash); // Adress to create a coredump for testing
   server.on("/resetValveError", handleResetValveError);
-  // TODO: detectSensors per Link aufrufen
   Logger.log(LOGID, ELOG_LEVEL_INFO, "Wifi manager ready.");
 
   strcpy(mqttWillTopic, mqttTopicPath);
@@ -1927,10 +1930,6 @@ void setup()
   Logger.log(LOGID, ELOG_LEVEL_INFO, "MQTT ready");
 
   // start OneWire sensor reading
-  tempSemaphore = xSemaphoreCreateBinary();
-  xSemaphoreGive(tempSemaphore); // Initialisiere Semaphore als frei
-  tempQueue = xQueueCreate(TEMP_QUEUE_LENGTH, sizeof(TempReport_t));
-  sensors.setWaitForConversion(false); // wichtig für Task‑Betrieb
   sensors.begin();
   detectSensors();
   // Allokiere SensorIds auf dem Heap und fülle sie
@@ -1939,7 +1938,15 @@ void setup()
   memcpy(pIds->ret, sensorRet_id, sizeof(DeviceAddress_t));
   memcpy(pIds->intl, sensorInt_id, sizeof(DeviceAddress_t));
   // Erstelle Tasks
-  xTaskCreatePinnedToCore(tempTask, "TempTask", 4096, pIds, 1, &tempTaskHandle, 1);
+  if (RTOSTaskTemp)
+  {
+    sensors.setWaitForConversion(false);
+    tempSemaphore = xSemaphoreCreateBinary();
+    xSemaphoreGive(tempSemaphore); // Initialisiere Semaphore als frei
+    tempQueue = xQueueCreate(TEMP_QUEUE_LENGTH, sizeof(TempReport_t));
+    xTaskCreatePinnedToCore(tempTask, "TempTask", 4096, pIds, 1, &tempTaskHandle, 1);
+    Logger.log(LOGID, ELOG_LEVEL_INFO, "1-Wire access running as RTOS task.");
+  }
   Logger.log(LOGID, ELOG_LEVEL_INFO, "Sensors ready");
 
   // configure the timezone
