@@ -1914,6 +1914,7 @@ void setup()
 
   strcpy(mqttWillTopic, mqttTopicPath);
   strcat(mqttWillTopic, MQTT_PUB_STATUS);
+  mqttClient.setClientId(iotWebConf.getThingName());
   mqttClient.setWill(mqttWillTopic, 0, true, "Offline", 7);
   mqttClient.onConnect(onMqttConnect);
   mqttClient.onDisconnect(onMqttDisconnect);
