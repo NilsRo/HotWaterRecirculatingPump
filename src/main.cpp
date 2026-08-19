@@ -58,7 +58,7 @@ const int WIFICONFIGPIN = D7;
 
 // button
 OneButton userBtn(DISPLAYPIN, true);
-OneButton resetBtn(DISPLAYPIN, true);
+OneButton resetBtn(WIFICONFIGPIN, true);
 
 // OTA
 TaskHandle_t otaTaskHandle = NULL;
