@@ -64,6 +64,7 @@ OneButton resetBtn(WIFICONFIGPIN, true);
 TaskHandle_t otaTaskHandle = NULL;
 
 bool manualMode = false;
+short manualModeCnt = 0;
 
 // pump
 static float t[] = {255.0, 255.0, 255.0, 255.0, 255.0}; // letzten 5 Temepraturwerte speichern
@@ -1496,7 +1497,7 @@ void displayOn()
 {
   display.displayOn();
   displayState = true;
-  displayOnAt = millis();
+  displayOnAt = nowMillis;
 }
 
 void displayOff()
@@ -1726,17 +1727,28 @@ void handleResetValveError()
 void handleUserBtnClick(void *oneButton)
 {
   Logger.log(LOGID, ELOG_LEVEL_DEBUG, "Button pressed ms: %u", ((OneButton *)oneButton)->getPressedMs());
-  if (manualMode)
+  if (displayState)
   {
-    if (pumpRunning)
-      pumpOff();
-    else
-      pumpOn();
-  }
-  else
-  {
-    if (!displayState)
-      displayOn();
+    if (manualMode)
+    {
+      switch (manualModeCnt)
+      {
+        case 0: 
+          pumpOn();
+          break;
+        case 1:
+          pumpOff();
+          break;
+        case 2:
+          valveOpen();
+          break;
+        case 3:
+          valveClose();
+          break;
+      }
+      if (manualModeCnt++ == 3)
+        manualModeCnt = 0;
+    }
     else
     {
       displayPageSubChange = nowMillis; // init the subpage timer
@@ -1744,42 +1756,16 @@ void handleUserBtnClick(void *oneButton)
         displayPage = 0;
       else
         displayPage++;
-
-      if (displayPage == 4)
-      {
-        if (iotWebConf.getState() != 4)
-          iotWebConf.goOffLine();
-      }
-      else
-      {
-        if (iotWebConf.getState() == 5)
-          iotWebConf.goOnLine();
-      }
     }
   }
+  displayOn();
 }
 
 void handleUserBtnLongPress(void *oneButton)
 {
   Logger.log(LOGID, ELOG_LEVEL_DEBUG, "Long press detected: %u", ((OneButton *)oneButton)->getPressedMs());
   manualMode = !manualMode;
-}
-
-void handleUserBtnDoublePress(void *oneButton)
-{
-  static short doublePressCnt = 0;
-  Logger.log(LOGID, ELOG_LEVEL_DEBUG, "Double press detected: %u", ((OneButton *)oneButton)->getPressedMs());
-  doublePressCnt++;
-  if (doublePressCnt == 1)
-    pumpOn();
-  else if (doublePressCnt == 2)
-    pumpOff();
-    else if (doublePressCnt == 3)
-    valveOpen();
-  else if (doublePressCnt == 4)
-    valveClose();
-  else
-    doublePressCnt = 0;
+  manualModeCnt = 0;
 }
 
 void handleResetBtnLongPress(void *oneButton)
@@ -1797,6 +1783,8 @@ void setup()
   // basic setup
   Serial.begin(115200);
   Logger.registerSerial(LOGID, ELOG_LEVEL_DEBUG, TAG, Serial);
+
+  nowMillis = millis();
 
   // initCoreDumpFlash();
   // esp_core_dump_init();
@@ -2013,10 +2001,8 @@ void setup()
   // Button
   userBtn.attachClick(handleUserBtnClick, &userBtn);
   userBtn.attachLongPressStop(handleUserBtnLongPress, &userBtn);
-  userBtn.attachDoubleClick(handleUserBtnDoublePress, &userBtn);
-  userBtn.setLongPressIntervalMs(1000);
   resetBtn.attachLongPressStop(handleResetBtnLongPress, &resetBtn);
-  resetBtn.setLongPressIntervalMs(1000);
+  resetBtn.setLongPressIntervalMs(2000);
   Logger.log(LOGID, ELOG_LEVEL_INFO, "Buttons ready");
 
   // Firmware als gültig markieren
